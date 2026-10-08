@@ -74,9 +74,6 @@ What we're looking at, and why it matters.>
 
 Frames: <n> · <n>
 
-*<Caption, plain, under the images: "2 · The car below the red cliffs.
-4 · Camp under the tree.">*
-
 <More sections only when the frames hold separate events or places.>
 
 ## Catalogue

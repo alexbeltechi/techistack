@@ -39,7 +39,8 @@
  *                     read left to right, each scaled to fill the width
  *   --format <f>      pdf | jpg | both (default both)
  *   --exclude <names> leave these files out, e.g. "000049,000050" (by name, with
- *                     or without extension); listed in the manifest as excluded
+ *                     or without extension; names with spaces work); listed in
+ *                     the manifest as excluded
  *   --raw             also preview raw files that have no export (macOS sips;
  *                     ignores Lightroom/XMP edits)
  *   --depth <n>       how deep to look (default: unlimited)
@@ -137,7 +138,7 @@ function parseArgs(argv) {
     else if (a === "--cols") opts.cols = Number(next());
     else if (a === "--format") opts.format = next();
     else if (a === "--depth") opts.depth = Number(next());
-    else if (a === "--exclude") opts.exclude.push(...next().split(/[,\s]+/).filter(Boolean).map((x) => x.toLowerCase()));
+    else if (a === "--exclude") opts.exclude.push(next().toLowerCase());
     else if (a === "--raw") opts.raw = true;
     else if (a === "--sample") opts.sample = true;
     else if (a === "--list") opts.list = path.resolve(next());
@@ -236,8 +237,11 @@ const slug = (s) =>
 /** A folder name that stands on its own: "Aug" alone says little, "2025-Aug" does. */
 function sourceLabel(folder) {
   const base = path.basename(folder);
+  const parent = path.basename(path.dirname(folder));
+  // "_export" says nothing; its shoot folder does.
+  if (/^[_\s-]*(exports?|selects?|selection|finals?|edits?|jpe?gs?|web|out)$/i.test(base)) return parent;
   const vague = base.length <= 4 || /^\d+$/.test(base) || /^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*$/i.test(base);
-  return vague ? `${path.basename(path.dirname(folder))}-${base}` : base;
+  return vague ? `${parent}-${base}` : base;
 }
 
 /** sharp can't read HEIC or raw on most builds; macOS sips can. Converts into tmp. */
@@ -612,7 +616,10 @@ async function sheet(opts) {
   const all = listed ? listed.map((f) => ({ path: f, kind: kindOf(f) })) : (await Promise.all(opts.folders.map((f) => walk(f, opts.depth)))).flat();
   const viewable = new Set(all.filter((f) => f.kind === "image" || f.kind === "heic").map((f) => stem(f.path)));
   // Left out at the user's request: matched by file name, with or without extension.
-  const isExcluded = (f) => opts.exclude.includes(path.basename(f.path).toLowerCase()) || opts.exclude.includes(stem(f.path));
+  // Commas separate names; spaces too, except inside a name that's really there ("DSC_0042 1.jpg").
+  const names = new Set(all.flatMap((f) => [path.basename(f.path).toLowerCase(), stem(f.path)]));
+  const exclude = opts.exclude.flatMap((x) => x.split(",").map((p) => p.trim()).filter(Boolean).flatMap((p) => (names.has(p) ? [p] : p.split(/\s+/))));
+  const isExcluded = (f) => exclude.includes(path.basename(f.path).toLowerCase()) || exclude.includes(stem(f.path));
   const excluded = all.filter((f) => (f.kind === "image" || f.kind === "heic" || f.kind === "raw") && isExcluded(f)).map((f) => path.basename(f.path));
   const pool = all
     .filter((f) => !isExcluded(f))

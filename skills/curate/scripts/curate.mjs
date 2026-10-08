@@ -23,6 +23,10 @@
  *   node curate.mjs pdf <_curate folder> [--paper a4|letter]
  *     the article PDF again, e.g. on Letter
  *   node curate.mjs status <_curate folder>
+ *   node curate.mjs leave-out <_curate folder> <n|file>... [--why "<reason>"] [--undo]
+ *     leave frames out (another shoot, a test, a duplicate export): never
+ *     deleted or moved, but off every later sheet, set and export of this
+ *     folder, until --undo brings them back
  *
  * Never touches the originals: they're only read. Every folder it makes is
  * new, and it never writes outside its own `_curate_…` folder.
@@ -90,9 +94,10 @@ async function newDir(parent, prefix) {
   }
 }
 
-/** Folders holding photos, and how many viewable frames, skipping our own output folders. */
-async function photoDirs(dir, out = new Set(), count = { frames: 0 }) {
+/** Folders holding photos, and how many viewable frames, skipping our own output folders (but noting curations). */
+async function photoDirs(dir, out = new Set(), count = { frames: 0, curations: [] }) {
   for (const e of await fs.readdir(dir, { withFileTypes: true })) {
+    if (e.isDirectory() && CURATE_DIR.test(e.name)) count.curations.push(path.join(dir, e.name));
     if (e.name.startsWith(".") || OURS.test(e.name)) continue;
     const full = path.join(dir, e.name);
     if (e.isDirectory()) await photoDirs(full, out, count);
@@ -101,7 +106,7 @@ async function photoDirs(dir, out = new Set(), count = { frames: 0 }) {
       if (VIEWABLE.test(e.name)) count.frames++;
     }
   }
-  return { dirs: out, frames: count.frames };
+  return { dirs: out, frames: count.frames, curations: count.curations };
 }
 
 /** Safe in a file name, still readable: "Ștefan & Ana — nuntă" → "Stefan-Ana-nunta". */
@@ -112,11 +117,13 @@ const slug = (s) =>
     .replace(/[^\p{L}\p{N}.+_-]+/gu, "-")
     .replace(/^[-.]+|-+$/g, "") || "work";
 
-/** "Aug" alone says little, "2025-Aug" does. */
+/** "Aug" alone says little, "2025-Aug" does; "_export" says nothing, its shoot folder does. */
 function sourceLabel(folder) {
   const base = path.basename(folder);
+  const parent = path.basename(path.dirname(folder));
+  if (/^[_\s-]*(exports?|selects?|selection|finals?|edits?|jpe?gs?|web|out)$/i.test(base)) return parent;
   const vague = base.length <= 4 || /^\d+$/.test(base) || /^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*$/i.test(base);
-  return vague ? `${path.basename(path.dirname(folder))}-${base}` : base;
+  return vague ? `${parent}-${base}` : base;
 }
 
 /** The effort in a curate folder: refuses anything that isn't one of ours. Picks up its contact sheet. */
@@ -187,6 +194,57 @@ function resolve(effort, list) {
   });
 }
 
+/** Frames left out of this effort, by sheet number (a left-out frame inherited from before isn't on the sheet at all). */
+function leftOutNumbers(effort) {
+  const out = new Map();
+  for (const o of effort.data.leftOut || []) {
+    const frame = effort.data.frames.find((f) => f.file === o.file);
+    if (frame) out.set(frame.n, o);
+  }
+  return out;
+}
+
+function refuseLeftOut(effort, numbers, where) {
+  const left = leftOutNumbers(effort);
+  const hit = numbers.filter((n) => left.has(n));
+  if (hit.length) fail(`${where}: frame${hit.length > 1 ? "s" : ""} ${hit.join(", ")} ${hit.length > 1 ? "are" : "is"} left out (${hit.map((n) => left.get(n).why || "no reason given").join("; ")}); bring back with leave-out --undo`);
+}
+
+/**
+ * What earlier curations left out inside `folder`: every `_curate_…` in a
+ * folder above it, in it, or below it (`below`, found on the walk), oldest
+ * first, so a later --undo wins. Absolute path → entry.
+ */
+async function inheritedLeftOut(folder, below = []) {
+  const dirs = [...below];
+  for (let dir = path.dirname(folder); ; dir = path.dirname(dir)) {
+    for (const name of (await fs.readdir(dir).catch(() => [])).filter((n) => CURATE_DIR.test(n))) dirs.push(path.join(dir, name));
+    if (path.dirname(dir) === dir) break;
+  }
+  const efforts = [];
+  for (const d of new Set(dirs)) {
+    for (const f of (await fs.readdir(d).catch(() => [])).filter((n) => n.endsWith(".json") && !n.startsWith("."))) {
+      try {
+        const data = JSON.parse(await fs.readFile(path.join(d, f), "utf8"));
+        if (data.kind === "curation" && (data.leftOut?.length || data.broughtBack?.length)) efforts.push(data);
+      } catch {
+        // not ours
+      }
+    }
+  }
+  const found = new Map();
+  const events = efforts.flatMap((d) => [
+    ...(d.leftOut || []).map((o) => ({ at: o.at, abs: path.join(d.source.folder, o.file), entry: { ...o, from: o.from ?? d.id } })),
+    ...(d.broughtBack || []).map((o) => ({ at: o.at, abs: path.join(d.source.folder, o.file), back: true })),
+  ]);
+  for (const e of events.sort((a, b) => String(a.at).localeCompare(String(b.at)))) {
+    if (!inside(e.abs, folder)) continue;
+    if (e.back) found.delete(e.abs);
+    else found.set(e.abs, e.entry);
+  }
+  return found;
+}
+
 async function open(args) {
   const result = await openEffort(path.resolve(args[0] || fail("usage: open <folder> [--name subject] [--review]")), args);
   console.log(JSON.stringify(result, null, 2));
@@ -234,6 +292,10 @@ async function openEffort(folder, args = []) {
   const source = commonParent(dirs);
   const nameAt = args.indexOf("--name");
   const subject = slug((nameAt > -1 && args[nameAt + 1]) || sourceLabel(folder));
+  // Frames an earlier curation left out stay out: off the sheet, so off everything after it.
+  const inherited = [...(await inheritedLeftOut(source, found.curations))]
+    .filter(([abs]) => existsSync(abs))
+    .map(([abs, o]) => ({ file: path.relative(source, abs), why: o.why ?? null, at: o.at, from: o.from }));
   const dir = await newDir(source, "_curate");
   const id = `${path.basename(dir)}_${subject}`;
   const data = {
@@ -255,18 +317,24 @@ async function openEffort(folder, args = []) {
     questions: [],
     review: null,
     selections: [],
-    history: [{ at: now(), event: `opened (${mode}, ${found.frames} viewable frames in ${dirs.length} folders)` }],
+    leftOut: inherited,
+    broughtBack: [],
+    history: [{ at: now(), event: `opened (${mode}, ${found.frames} viewable frames in ${dirs.length} folders)${inherited.length ? `, ${inherited.length} left out from before` : ""}` }],
   };
   const dataPath = path.join(dir, `${id}.json`);
   await fs.writeFile(dataPath, JSON.stringify(data, null, 2));
-  const sheet = mode === "review" ? "--sample" : "--max all";
+  // What's left to look at once the left-out frames are off the sheet.
+  const frames = found.frames - inherited.filter((o) => VIEWABLE.test(o.file)).length;
+  const exclude = inherited.length ? ` --exclude "${[...new Set(inherited.map((o) => path.basename(o.file)))].join(",")}"` : "";
+  const sheet = (mode === "review" ? "--sample" : "--max all") + exclude;
   return {
     folder: dir,
     id,
     mode,
-    frames: found.frames,
-    pages: mode === "review" ? null : Math.ceil(found.frames / PER_PAGE),
+    frames,
+    pages: mode === "review" ? null : Math.ceil(frames / PER_PAGE),
     folders: dirs.length,
+    ...(inherited.length ? { leftOut: inherited.map((o) => ({ file: o.file, why: o.why })) } : {}),
     report: path.join(dir, `${id}.md`),
     data: dataPath,
     // A review keeps its own snapshot of the archive inside it, then looks at a sample.
@@ -309,6 +377,8 @@ async function write(args) {
     }
     for (const group of plan.nearDuplicates || []) resolve(effort, group.frames || group);
     for (const section of plan.article?.sections || []) section.frames = resolve(effort, section.frames || []);
+    for (const set of plan.sets || []) refuseLeftOut(effort, set.frames, `set ${set.key}`);
+    for (const section of plan.article?.sections || []) refuseLeftOut(effort, section.frames, `article section "${section.heading ?? ""}"`);
     if (plan.review) {
       // Which folders are worth their own curation: each must exist under the source.
       for (const f of plan.review.folders || []) {
@@ -402,6 +472,7 @@ async function select(args) {
     numbers = resolve(effort, opts.picks);
   }
   if (new Set(numbers).size !== numbers.length) fail("a frame is picked twice");
+  refuseLeftOut(effort, numbers, "select");
 
   const out = await newDir(effort.dir, "selection");
   const byN = new Map(effort.data.frames.map((f) => [f.n, f]));
@@ -510,6 +581,79 @@ async function status(args) {
         sets: data.sets.map((s) => ({ key: s.key, title: s.title, frames: s.frames })),
         questions: data.questions,
         selections: data.selections.map((s) => ({ folder: s.folder, set: s.set, frames: s.frames })),
+        ...(data.leftOut?.length ? { leftOut: data.leftOut.map((o) => ({ file: o.file, why: o.why })) } : {}),
+      },
+      null,
+      2,
+    ),
+  );
+}
+
+/**
+ * Leave frames out without touching them: recorded in the effort, taken out of
+ * its sets and article, and carried into every later curation of this folder
+ * (and its sheet's --exclude). --undo brings them back.
+ */
+async function leaveOut(args) {
+  const effort = await load(args[0] || fail('usage: leave-out <_curate folder> <n|file>... [--why "<reason>"] [--undo]'));
+  needFrames(effort);
+  const opts = { why: null, undo: false, picks: [] };
+  for (let i = 1; i < args.length; i++) {
+    const a = args[i];
+    if (a === "--why") opts.why = args[++i] ?? fail("--why needs a reason");
+    else if (a === "--undo") opts.undo = true;
+    else opts.picks.push(...(isFrameFile(effort, a) ? [a] : a.split(/[,\s]+/).filter(Boolean)));
+  }
+  if (!opts.picks.length) fail("give frame numbers or file names");
+  const numbers = [...new Set(resolve(effort, opts.picks))];
+  const byN = new Map(effort.data.frames.map((f) => [f.n, f]));
+  effort.data.leftOut ??= [];
+  effort.data.broughtBack ??= [];
+  const changed = [];
+  for (const n of numbers) {
+    const file = byN.get(n).file;
+    effort.data.leftOut = effort.data.leftOut.filter((o) => o.file !== file);
+    effort.data.broughtBack = effort.data.broughtBack.filter((o) => o.file !== file);
+    if (opts.undo) effort.data.broughtBack.push({ file, at: now() });
+    else effort.data.leftOut.push({ file, why: opts.why, at: now() });
+    changed.push({ n, file });
+  }
+  // Out of this effort's plan too, so nothing already proposed still shows them.
+  const removed = [];
+  if (!opts.undo) {
+    const gone = new Set(numbers);
+    for (const set of effort.data.sets || []) {
+      const hit = set.frames.filter((n) => gone.has(n));
+      if (!hit.length) continue;
+      set.frames = set.frames.filter((n) => !gone.has(n));
+      if (gone.has(set.opening)) set.opening = set.frames[0] ?? null;
+      if (gone.has(set.ending)) set.ending = set.frames.at(-1) ?? null;
+      removed.push(`set ${set.key}: ${hit.join(", ")}`);
+    }
+    for (const section of effort.data.article?.sections || []) {
+      const hit = section.frames.filter((n) => gone.has(n));
+      if (!hit.length) continue;
+      section.frames = section.frames.filter((n) => !gone.has(n));
+      removed.push(`article "${section.heading ?? ""}": ${hit.join(", ")}`);
+    }
+  }
+  const verb = opts.undo ? "brought back" : "left out";
+  effort.data.history.push({ at: now(), event: `${verb} ${numbers.join(", ")}${opts.why ? ` (${opts.why})` : ""}` });
+  await save(effort);
+  let pdf = null;
+  if (removed.some((r) => r.startsWith("article")) && effort.data.article?.sections?.some((s) => s.frames.length)) {
+    pdf = (await renderArticle(effort.data, path.join(effort.dir, `${effort.data.id}.pdf`)).catch((err) => fail(err.message))).file;
+  }
+  console.log(
+    JSON.stringify(
+      {
+        [opts.undo ? "broughtBack" : "leftOut"]: changed,
+        ...(opts.why ? { why: opts.why } : {}),
+        ...(removed.length ? { removedFrom: removed } : {}),
+        ...(pdf ? { pdf } : {}),
+        note: opts.undo
+          ? "back in: later curations of this folder show them again"
+          : "nothing deleted or moved; later curations of this folder leave them off the sheet",
       },
       null,
       2,
@@ -518,6 +662,6 @@ async function status(args) {
 }
 
 const [cmd, ...rest] = process.argv.slice(2);
-const commands = { measure, open, next, write, select, pdf, status };
-if (!commands[cmd]) fail("commands: measure, open, next, write, select, pdf, status (see the header of this file)");
+const commands = { measure, open, next, write, select, pdf, status, "leave-out": leaveOut };
+if (!commands[cmd]) fail("commands: measure, open, next, write, select, pdf, status, leave-out (see the header of this file)");
 await commands[cmd](rest);

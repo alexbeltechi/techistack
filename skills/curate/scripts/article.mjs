@@ -153,7 +153,10 @@ export async function renderArticle(data, file, { paper = "a4" } = {}) {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "curate-pdf-"));
   const byN = new Map(data.frames.map((fr) => [fr.n, fr]));
   // Each image's keywords, wrapped to its width; a row is as tall as its longest.
-  const labels = (row) => row.items.map((it) => (keywordsOf(it.fr) ? wrap(keywordsOf(it.fr), it.ratio * row.height, f.sans, L.keywords) : []));
+  // Keywords start under the edge text, not the image: its glyphs climb left of the baseline by about their height.
+  const edgeLeft = L.strip - 1 - f.sans.heightAtSize(L.edge, { descender: false });
+  const labelIndent = L.strip + L.stripGap - edgeLeft;
+  const labels = (row) => row.items.map((it) => (keywordsOf(it.fr) ? wrap(keywordsOf(it.fr), it.ratio * row.height + labelIndent, f.sans, L.keywords) : []));
   const labelHeight = (lines) => {
     const most = Math.max(0, ...lines.map((l) => l.length));
     return most ? L.keywordsGap + most * L.keywordsLeading : 0;
@@ -202,11 +205,9 @@ export async function renderArticle(data, file, { paper = "a4" } = {}) {
     }
     const sectionRows = rows(items, fullW);
 
-    // Above the images, the curator's observation (in their voice); below, a plain caption.
+    // Above the images, the curator's observation (in their voice); under each image, its keywords.
     // Keep the heading and observation on the same page as the first row of images.
     const paras = String(section.observation ?? section.text ?? "").split(/\n\s*\n/).filter(Boolean);
-    const caption = section.caption ? winAnsi(section.caption) : "";
-    const captionHeight = caption ? wrap(caption, L.column, f.sans, 8.5).length * 12 + 6 : 0;
     const textHeight =
       (section.heading ? 22 : 0) + paras.reduce((sum, p) => sum + wrap(p, L.column, f.serif, 11.5).length * 17 + 9, 0) + 6;
     // (Only when that fits on one page; a longer observation just flows on.)
@@ -217,11 +218,11 @@ export async function renderArticle(data, file, { paper = "a4" } = {}) {
     for (const para of paras) text(para, { font: f.serif, size: 11.5, leading: 17, after: 9 });
     y += 6;
 
-    for (const [r, row] of sectionRows.entries()) {
-      // Each row keeps its keywords with it, and the last row the caption.
+    for (const row of sectionRows) {
+      // Each row keeps its keywords with it.
       const rowLabels = labels(row);
       const under = labelHeight(rowLabels);
-      const need = row.height + under + (r === sectionRows.length - 1 ? captionHeight : 0);
+      const need = row.height + under;
       if (room() < need) newPage();
       const used = row.items.reduce((s, it) => s + it.ratio * row.height, 0) + row.items.length * (L.strip + L.stripGap) + (row.items.length - 1) * L.gap;
       let x = L.side + (fullW - used) / 2;
@@ -237,7 +238,7 @@ export async function renderArticle(data, file, { paper = "a4" } = {}) {
         page.drawImage(img, { x: ix, y: H - y - row.height, width: w, height: row.height });
         for (const [l, line] of rowLabels[k].entries()) {
           const top = y + row.height + L.keywordsGap + l * L.keywordsLeading;
-          page.drawText(line, { x: ix, y: H - top - L.keywords, size: L.keywords, font: f.sans, color: INK.dim });
+          page.drawText(line, { x: x + edgeLeft, y: H - top - L.keywords, size: L.keywords, font: f.sans, color: INK.dim });
         }
 
         // Contact-sheet edge text, climbing the image: folder · number · file.
@@ -258,7 +259,6 @@ export async function renderArticle(data, file, { paper = "a4" } = {}) {
       }
       y += row.height + under + L.gap;
     }
-    if (caption) text(caption, { font: f.sans, size: 8.5, leading: 12, color: INK.dim, after: 0 });
     y += 22;
   }
 

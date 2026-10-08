@@ -76,7 +76,7 @@ It depends on the work:
 
 - **The voice:** first impression, the story, the summary, each article
   section's observation, the reasons in a recommendation.
-- **Plain:** captions under images, the catalogue, file lists, open
+- **Plain:** the catalogue (each frame's caption, keywords, text), file lists, open
   questions. Those are for search, for agents, and for whoever needs facts.
 
 ## Examples

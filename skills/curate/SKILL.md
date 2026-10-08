@@ -159,10 +159,34 @@ and the review looks at a sample of it and judges. The work changes shape:
    Curate them one by one, from step 3. If one is still more than you can
    look at, say so and review that one first.
 
-If the user says to leave certain images out ("not 000049 and 000050"), pass
-them to the contact sheet with `--exclude 000049,000050`. Then they're nowhere
-in the effort: not on the sheet, in the numbering, the catalogue, a set or an
-export. Note it in the report's brief and closing line. Never delete them.
+If the user says to leave certain images out before the sheet is made ("not
+000049 and 000050"), pass them to the contact sheet with
+`--exclude 000049,000050`. Then they're nowhere in the effort: not on the
+sheet, in the numbering, the catalogue, a set or an export. Note it in the
+report's brief and closing line. Never delete them.
+
+### Leave out
+
+Once the sheet exists, a frame that doesn't belong is **left out**, not
+deleted:
+
+```bash
+node <skill>/scripts/curate.mjs leave-out "<_curate folder>" 42 --why "2015, another shoot"
+node <skill>/scripts/curate.mjs leave-out "<_curate folder>" 42 --undo
+```
+
+It keeps its number on this sheet but leaves this effort's sets and article
+(the PDF is redrawn), and `write` and `select` refuse it. Every later
+curation of the folder, or of a folder above or below it, starts with it
+left out: `open` lists it and puts it in the sheet command's `--exclude`.
+The `/scan` map lists every left-out frame. The file is never touched.
+
+Leave a frame out on your own only for facts you can name: another shoot
+filed in the folder (a different date, place or sitters), a test or
+calibration frame, a broken file, the same export twice. Always give
+`--why`, and list what you left out in the hand-over so the user can bring
+it back. Never for what a frame shows, and never because you'd simply not
+pick it: that's what sets are for.
 
 ## 4. Report
 
@@ -182,7 +206,7 @@ art running through them, talking to us, the audience, the way a Nowness
 voice-over sounds. They observe, then deduce what the work says about the
 life around it, and they have opinions. The first impression, the story,
 the summary, the reasons for picks and each article observation are in
-that voice. Captions, the catalogue and lists stay plain.
+that voice. The catalogue (each frame's caption, keywords and text) and lists stay plain.
 
 **The report** (`references/report-template.md`), in this order:
 
@@ -211,9 +235,9 @@ that voice. Captions, the catalogue and lists stay plain.
 9. **Article draft:** the work as a post, ready for any CMS or agent to
    turn into blocks: a title that could be the post title, then sections.
    Each section has a heading, an **observation** (the curator, a short
-   paragraph above the images: what we're looking at and why it matters),
-   the frames, and a **caption** (plain, under the images: frame numbers and
-   what's in them). One section when it's one story; several when the frames
+   paragraph above the images: what we're looking at and why it matters)
+   and the frames. No caption per section: each frame's catalogue caption
+   and keywords already say what's in it. One section when it's one story; several when the frames
    hold separate events or places (a roll with two trips, a folder of
    unrelated shoots). The summary carries the wider context above them.
 10. **Catalogue:** every frame as seen: a one-line caption, subjects, people
@@ -259,8 +283,7 @@ number or file name):
   "questions": ["…"],
   "article": {
     "title": "…",
-    "sections": [{ "heading": "…", "observation": "…", "frames": [2, 4],
-                   "caption": "2 · … 4 · …" }]
+    "sections": [{ "heading": "…", "observation": "…", "frames": [2, 4] }]
   },
   "catalogue": [
     { "n": 1, "caption": "…", "subjects": ["…"], "people": "…",
@@ -287,11 +310,11 @@ node <skill>/scripts/curate.mjs pdf "<_curate folder>" [--paper a4|letter]
 
 Title, date, the summary, then each section: the observation in a reading
 column, its frames across the full page width, in justified rows with
-contact-sheet edge text (folder · number · file), each frame's keywords
-under it, and the section's caption under the rows. Always on white (the contact sheets also come on black; the article
+contact-sheet edge text (folder · number · file) and each frame's keywords
+under it. Always on white (the contact sheets also come on black; the article
 doesn't). A4 by default; real text, so it prints, reads aloud, and an AI can
 read it. A section's observation stays on the page with its first row of
-images, and the caption with its last.
+images.
 
 ## 5. Hand over and stop
 

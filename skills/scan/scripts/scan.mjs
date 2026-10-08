@@ -92,8 +92,11 @@ const slug = (s) =>
 /** "Aug" alone says little, "2025-Aug" does. */
 function sourceLabel(folder) {
   const base = path.basename(folder);
+  const parent = path.basename(path.dirname(folder));
+  // "_export" says nothing; its shoot folder does.
+  if (/^[_\s-]*(exports?|selects?|selection|finals?|edits?|jpe?gs?|web|out)$/i.test(base)) return parent;
   const vague = base.length <= 4 || /^\d+$/.test(base) || /^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*$/i.test(base);
-  return vague ? `${path.basename(path.dirname(folder))}-${base}` : base;
+  return vague ? `${parent}-${base}` : base;
 }
 
 /** Promise.all over items.map(fn), with at most `limit` running at once. */
@@ -137,6 +140,12 @@ async function oursIn(abs, names) {
             const data = JSON.parse(await fs.readFile(path.join(abs, name, f), "utf8"));
             if (data.kind === "curation") {
               Object.assign(item, { status: data.status, subject: data.subject, selections: data.selections?.length ?? 0 });
+              // Frames left out (another shoot, a test), and any brought back: never deleted, just not shown.
+              const marks = [
+                ...(data.leftOut || []).map((o) => ({ file: o.file, why: o.why ?? null, at: o.at })),
+                ...(data.broughtBack || []).map((o) => ({ file: o.file, at: o.at, back: true })),
+              ];
+              if (marks.length) item.leftOut = marks;
               // How many frames carry each keyword (older efforts called them tags).
               const counts = {};
               for (const fr of data.frames || []) for (const k of new Set((fr.notes?.keywords ?? fr.notes?.tags ?? []).map((x) => String(x).toLowerCase().trim()).filter(Boolean))) counts[k] = (counts[k] || 0) + 1;
@@ -452,6 +461,18 @@ function render(index) {
       out.push(`- **${k}** · ${num(frames)} frame${frames > 1 ? "s" : ""}: ${where.slice(0, 5).join(", ")}${where.length > 5 ? `, +${where.length - 5} more` : ""}`);
     }
     if (top.length > 60) out.push(`- …and ${num(top.length - 60)} more keywords (see the .json, or \`find\`)`);
+    out.push("");
+  }
+
+  // Left out by a curation, newest word wins: these stay on disk but off every sheet and set.
+  const left = new Map();
+  for (const m of efforts.flatMap((e) => (e.leftOut || []).map((m) => ({ ...m, path: join(e.rel, m.file) }))).sort((a, b) => String(a.at).localeCompare(String(b.at)))) {
+    if (m.back) left.delete(m.path);
+    else left.set(m.path, m);
+  }
+  if (left.size) {
+    out.push("## Left out", "", "Frames a curation left out (another shoot, a test, a duplicate). Still on disk; later curations skip them. `curate.mjs leave-out … --undo` brings one back.", "");
+    for (const [p, m] of [...left].sort((a, b) => a[0].localeCompare(b[0]))) out.push(`- \`${p}\`${m.why ? `: ${m.why}` : ""}`);
     out.push("");
   }
 

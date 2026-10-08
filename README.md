@@ -66,9 +66,9 @@ studio-visit/_curate_2026-10-08/
    - **the story, as it reads it**: observations and deductions from the pictures, names and dates, with guesses marked as guesses;
    - a **summary** you can reuse as a description;
    - what's here, observations, recommended **sets** (frames in order, why, what's left out) and open questions;
-   - an **article draft**: a post title and sections, each with the curator's observation, its frames and a plain caption, ready for any CMS;
+   - an **article draft**: a post title and sections, each with the curator's observation and its frames, ready for any CMS;
    - a **catalogue** of every frame, for search and for the next agent.
-4. **article PDF:** title, date, summary, then each section: the observation in a reading column, the frames across the full page width with contact-sheet edge text, a caption underneath. A4 or Letter, real text, good for printing or reading aloud.
+4. **article PDF:** title, date, summary, then each section: the observation in a reading column, the frames across the full page width with contact-sheet edge text, each frame's keywords underneath. A4 or Letter, real text, good for printing or reading aloud.
 5. **stop.** it asks what you'd like exported.
 6. **select:** say a set ("A as it is"), numbers, circles on the sheet or file names, and a quality: **original** (the files as they are), **large** (full resolution), **web** (2560 px, the default) or **small** (1200 px). each export is its own `selection_…` folder, as many as you like.
 7. **learn:** your corrections go into `lessons.md` and override the defaults next time.

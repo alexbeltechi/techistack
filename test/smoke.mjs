@@ -72,6 +72,7 @@ await img("road trip/clear.png", 600, 400, "png", { alpha: true });
 await img("road trip/rotated.jpg", 1200, 800, "jpeg", { meta: { orientation: 6 } });
 await img("road trip/a long name with spaces 0042.jpg", 800, 600);
 await img("Ștefan & Ana — nuntă/Zoë’s “quote” 03.jpg", 800, 1200);
+await img("2019-05-04_studio-visit/_export/IMG_4821.jpg", 800, 600);
 fs.writeFileSync(path.join(A, "road trip/broken.jpg"), "not a jpeg");
 fs.writeFileSync(path.join(A, "road trip/zero.jpg"), "");
 fs.writeFileSync(path.join(A, "road trip/clip.mov"), "not a video");
@@ -133,9 +134,9 @@ for (let d = 1; d <= 8; d++) {
   for (let i = 1; i <= 40; i++) fs.writeFileSync(path.join(BIG, `shoot-${d}`, "export", `IMG_${String(i).padStart(4, "0")}.jpg`), tiny);
 }
 await check("--sample: every shoot, more from bigger ones", () => {
-  // roll 30 → 3, road trip 9 → 2, the wedding's one frame → 1
+  // roll 30 → 3, road trip 9 → 2, the wedding's one frame → 1, the studio visit's one → 1
   const m = JSON.parse(fs.readFileSync(json(CS, "sheet", A, "--sample", "--format", "pdf").manifest, "utf8"));
-  return m.shown === 6 && m.sampling.shoots === 3 && m.sampling.of === 3;
+  return m.shown === 7 && m.sampling.shoots === 4 && m.sampling.of === 4;
 });
 await check("--sample within --max, one per shoot at least", () => {
   const m = JSON.parse(fs.readFileSync(json(CS, "sheet", BIG, "--sample", "--max", "10", "--format", "pdf").manifest, "utf8"));
@@ -319,6 +320,35 @@ await check("scan: keywords in the map, find by word", () => {
   const phrase = json(SC, "find", A, "no entry");
   return map.includes("## Keywords") && map.includes("**car**") && car.found === 2 && both.found === 1 && both.frames[0].exported.length > 0 && none.found === 0 && phrase.found === 1;
 });
+
+// Leave out: never deleted, off the plan, and off every later curation of the folder
+const spaced = "a long name with spaces 0042";
+await check("leave-out: off the sets and article, the file untouched", () => {
+  const r = json(CU, "leave-out", effort, "web", "--why", "another shoot");
+  const data = JSON.parse(fs.readFileSync(path.join(effort, `${path.basename(effort)}_road-trip.json`), "utf8"));
+  return r.leftOut[0].file === "web.webp" && r.removedFrom.some((x) => x.startsWith("set A")) && r.removedFrom.some((x) => x.startsWith("article")) && !data.sets[0].frames.includes(r.leftOut[0].n) && fs.existsSync(path.join(A, "road trip", "web.webp"));
+});
+await check("leave-out: a name with spaces", () => json(CU, "leave-out", effort, spaced, "--why", "a test").leftOut.length === 1);
+await check("leave-out: select and write refuse a left-out frame", () => fails(CU, "select", effort, "web") && fails(CU, "write", effort, "--plan", plan));
+await check("leave-out: status lists them", () => json(CU, "status", effort).leftOut.length === 2);
+await check("leave-out: a new curation inherits them, its sheet skips them", () => {
+  const o = json(CU, "open", path.join(A, "road trip"));
+  const ex = o.next[0].match(/--exclude "([^"]+)"/)[1];
+  const sheet = json(CS, "sheet", path.join(A, "road trip"), "--max", "all", "--exclude", ex, "--out", o.folder);
+  const manifest = JSON.parse(fs.readFileSync(sheet.manifest, "utf8"));
+  return o.leftOut.length === 2 && o.frames === 7 && sheet.shown === 7 && manifest.excluded.length === 2;
+});
+await check("leave-out --undo: the next curation shows it again", () => {
+  json(CU, "leave-out", effort, "web", "--undo");
+  const o = json(CU, "open", path.join(A, "road trip"));
+  return o.leftOut.length === 1 && o.leftOut[0].file.includes("0042");
+});
+await check("leave-out: an archive-wide curation passes it down", () => json(CU, "open", A).leftOut?.length === 1);
+await check("scan: left-out frames in the map", () => {
+  const map = fs.readFileSync(json(SC, "update", A).md, "utf8");
+  return map.includes("## Left out") && map.includes(spaced) && !map.includes("web.webp`");
+});
+await check("an _export folder is named after its shoot", () => json(CU, "open", path.join(A, "2019-05-04_studio-visit", "_export")).id.endsWith("_2019-05-04_studio-visit"));
 
 // The rule above all: originals untouched, and only our dated folders added.
 const after = snapshot();

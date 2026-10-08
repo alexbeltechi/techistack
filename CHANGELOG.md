@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.7.0 — 2026-10-08
+
+- **Leave out, without deleting:** `curate.mjs leave-out <_curate folder>
+  42 --why "2015, another shoot"` marks frames that don't belong (another
+  shoot in the folder, a test, a broken file, a duplicate export). The file
+  isn't touched; the frame leaves the effort's sets and article, `write` and
+  `select` refuse it, and every later curation of that folder, or of a
+  folder above or below it, starts with it left out (`open` lists it and
+  puts it in the sheet's `--exclude`). `--undo` brings it back. The `/scan`
+  map has a "Left out" section.
+- **An `_export` folder is named after its shoot:** curations, sheets and
+  scans of a folder called `_export`, `export`, `selects`, `final` and the
+  like take the parent folder's name, so a curation reads
+  `_curate_…_2019-05-04_studio-visit`, not `_curate_…__export`.
+- `/contactsheet --exclude` takes file names with spaces in them.
+- **No more section captions in the article:** each frame's catalogue
+  caption and keywords already say what's in it, so the report's article
+  draft, the plan and the PDF no longer have a plain caption per section.
+  A caption in an older plan is ignored.
+- Article PDF: the keywords under each image start where its edge text
+  starts, not at the image, so the two line up.
+
 ## 0.6.0 — 2026-10-08
 
 - **Keywords, for search like a phone's photos:** `/curate`'s catalogue now
