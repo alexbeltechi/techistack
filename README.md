@@ -14,7 +14,7 @@ agents are good at moving files and bad at taste. hand one an archive and say "p
 
 **the curator has a voice.** someone with art running through them, talking to us, the audience, the way a good Nowness film sounds. they observe, then deduce what the work says about the life around it ("one stool, one bowl, water hung from a tree so it stays cool: someone who makes ordinary life work simply, and enjoys it"). opinionated, unhurried, no superlatives. it's a file, [`curator.md`](./skills/curate/references/curator.md): swap in your own.
 
-**it's built for agents as much as for you.** every contact sheet has a JSON manifest: each printed number mapped to its exact file, with size, orientation, capture date and where it sits on the page. every curation has a report in markdown and the same as JSON, with a catalogue of every frame (caption, people, objects, place, light, colour, mood, tags) and an article draft any CMS can turn into a post. the next agent reads that instead of looking at your pictures all over again.
+**it's built for agents as much as for you.** every contact sheet has a JSON manifest: each printed number mapped to its exact file, with size, orientation, capture date and where it sits on the page. every curation has a report in markdown and the same as JSON, with a catalogue of every frame (caption, people, objects, place, light, colour, mood, the words you would search it by) and an article draft any CMS can turn into a post. the next agent reads that instead of looking at your pictures all over again.
 
 fork it. make it yours.
 

@@ -12,10 +12,15 @@
  *                                             scan, or rescan only the folders that changed
  *   node scan.mjs show <folder> [--depth n]   one folder from the index: totals, subfolders, notes
  *   node scan.mjs note <folder> "<text>"      what a folder is, kept across rescans ("" removes it)
+ *   node scan.mjs find <folder> <word>...     frames whose /curate keywords, caption or text match every word
  *
  * Inside `_scan_2026-10-08/`:
  *   _scan_2026-10-08_Archive.md     the map, to read
  *   _scan_2026-10-08_Archive.json   every folder's facts, for agents and rescans
+ *
+ * Keywords come from /curate: each curation's catalogue says what's in every
+ * frame it looked at, and the map gathers them, so "car" finds the cars in
+ * everything that's been curated, without looking again.
  *
  * Never opens a photo and never writes outside its own `_scan_…` folder. Skips
  * hidden files, techistack's own folders (but lists them: they say what has
@@ -130,7 +135,13 @@ async function oursIn(abs, names) {
         for (const f of (await fs.readdir(path.join(abs, name)).catch(() => [])).filter((n) => n.endsWith(".json"))) {
           try {
             const data = JSON.parse(await fs.readFile(path.join(abs, name, f), "utf8"));
-            if (data.kind === "curation") Object.assign(item, { status: data.status, subject: data.subject, selections: data.selections?.length ?? 0 });
+            if (data.kind === "curation") {
+              Object.assign(item, { status: data.status, subject: data.subject, selections: data.selections?.length ?? 0 });
+              // How many frames carry each keyword (older efforts called them tags).
+              const counts = {};
+              for (const fr of data.frames || []) for (const k of new Set((fr.notes?.keywords ?? fr.notes?.tags ?? []).map((x) => String(x).toLowerCase().trim()).filter(Boolean))) counts[k] = (counts[k] || 0) + 1;
+              if (Object.keys(counts).length) item.keywords = Object.fromEntries(Object.entries(counts).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])));
+            }
           } catch {
             // Not ours to judge; the folder is still listed.
           }
@@ -423,6 +434,27 @@ function render(index) {
     out.push("");
   }
 
+  // What's in the curated work, by keyword: the most frames first.
+  const byKeyword = new Map();
+  for (const e of efforts) {
+    for (const [k, n] of Object.entries(e.keywords || {})) {
+      const entry = byKeyword.get(k) ?? { frames: 0, folders: new Map() };
+      entry.frames += n;
+      entry.folders.set(e.rel, (entry.folders.get(e.rel) || 0) + n);
+      byKeyword.set(k, entry);
+    }
+  }
+  if (byKeyword.size) {
+    const top = [...byKeyword].sort((a, b) => b[1].frames - a[1].frames || a[0].localeCompare(b[0]));
+    out.push("## Keywords", "", "What the curated frames show, from each curation's catalogue. `scan.mjs find <folder> <word>` lists the frames.", "");
+    for (const [k, { frames, folders }] of top.slice(0, 60)) {
+      const where = [...folders].sort((a, b) => b[1] - a[1]).map(([rel, n]) => `\`${rel}\` (${n})`);
+      out.push(`- **${k}** · ${num(frames)} frame${frames > 1 ? "s" : ""}: ${where.slice(0, 5).join(", ")}${where.length > 5 ? `, +${where.length - 5} more` : ""}`);
+    }
+    if (top.length > 60) out.push(`- …and ${num(top.length - 60)} more keywords (see the .json, or \`find\`)`);
+    out.push("");
+  }
+
   const rawOnly = rels.filter((rel) => {
     const t = agg(rel);
     if (!t.kinds.raw || t.kinds.image || t.kinds.heic) return false;
@@ -665,7 +697,78 @@ async function note(args) {
   console.log(JSON.stringify({ folder: rel, note: index.notes[rel]?.text ?? null, ...written }, null, 2));
 }
 
+/** A word or phrase as a whole word in `hay`; "cars" finds "car" and the other way round. */
+function matches(hay, word) {
+  const stem = word.length > 3 ? word.replace(/s$/, "") : word;
+  const esc = stem.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(^|[^\\p{L}\\p{N}])${esc}s?($|[^\\p{L}\\p{N}])`, "iu").test(hay);
+}
+
+async function find(args) {
+  const [folderArg, ...words] = args;
+  if (!folderArg || !words.length) fail("usage: find <folder> <word>...");
+  const folder = path.resolve(folderArg);
+  const found = (await findScan(folder)) || fail(`no scan covers ${folder}; run update first`);
+  const { root, index } = found;
+  const under = toRel(root, folder);
+  const terms = words.flatMap((w) => w.toLowerCase().split(/,/)).map((w) => w.trim()).filter(Boolean);
+  const hits = new Map(); // by file, the newest curation's entry
+  let curations = 0;
+  for (const [rel, rec] of Object.entries(index.dirs)) {
+    if (under !== "." && rel !== under && !rel.startsWith(`${under}/`)) continue;
+    for (const o of (rec.ours || []).filter((x) => x.kind === "curation")) {
+      const dir = path.join(toAbs(root, rel), o.name);
+      for (const f of (await fs.readdir(dir).catch(() => [])).filter((n) => n.endsWith(".json") && !n.startsWith("."))) {
+        let data;
+        try {
+          data = JSON.parse(await fs.readFile(path.join(dir, f), "utf8"));
+        } catch {
+          continue;
+        }
+        if (data.kind !== "curation") continue;
+        curations++;
+        // Where the frames are: the source as written, or the folder the effort sits in (a moved drive).
+        const base = existsSync(data.source?.folder ?? "") ? data.source.folder : path.dirname(dir);
+        for (const fr of data.frames || []) {
+          const keywords = fr.notes?.keywords ?? fr.notes?.tags ?? [];
+          const hay = [...keywords, ...(fr.notes?.text ?? []), fr.notes?.caption ?? ""].join(" | ");
+          if (!terms.every((t) => matches(hay, t))) continue;
+          const file = path.join(base, fr.file);
+          const prev = hits.get(file);
+          if (prev && prev.created > data.created) continue;
+          hits.set(file, {
+            file,
+            folder: toRel(root, path.dirname(file)),
+            n: fr.n,
+            ...(fr.notes?.caption ? { caption: fr.notes.caption } : {}),
+            keywords,
+            ...(fr.notes?.text?.length ? { text: fr.notes.text } : {}),
+            curation: path.join(rel, o.name),
+            exported: (data.selections || []).filter((sel) => sel.frames?.includes(fr.n)).map((sel) => path.join(rel, o.name, sel.folder)),
+            created: data.created,
+          });
+        }
+      }
+    }
+  }
+  const frames = [...hits.values()].sort((a, b) => a.folder.localeCompare(b.folder) || a.n - b.n).map(({ created, ...h }) => h);
+  console.log(
+    JSON.stringify(
+      {
+        words: terms,
+        scannedAt: index.scannedAt,
+        curations,
+        found: frames.length,
+        ...(curations ? {} : { note: "nothing here has been curated yet: keywords come from /curate's catalogue" }),
+        frames,
+      },
+      null,
+      2,
+    ),
+  );
+}
+
 const [cmd, ...rest] = process.argv.slice(2);
-const commands = { status, update, show, note };
-if (!commands[cmd]) fail("commands: status, update, show, note (see the header of this file)");
+const commands = { status, update, show, note, find };
+if (!commands[cmd]) fail("commands: status, update, show, note, find (see the header of this file)");
 await commands[cmd](rest);

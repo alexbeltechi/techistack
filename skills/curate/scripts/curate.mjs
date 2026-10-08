@@ -18,8 +18,10 @@
  *   node curate.mjs next <review _curate folder> [<folder>...]
  *     "go": opens an effort for each folder the review proposed (or those given)
  *   node curate.mjs write <_curate folder> --report <draft.md> [--plan <plan.json>]
+ *     a plan with an article also lays it out as the article PDF (A4)
  *   node curate.mjs select <_curate folder> (<n|file>... | --set <key> [<n>...]) [--preset original|large|web|small]
  *   node curate.mjs pdf <_curate folder> [--paper a4|letter]
+ *     the article PDF again, e.g. on Letter
  *   node curate.mjs status <_curate folder>
  *
  * Never touches the originals: they're only read. Every folder it makes is
@@ -333,8 +335,15 @@ async function write(args) {
     await fs.writeFile(effort.reportPath, body.includes(CREDIT) ? body : `${body.trimEnd()}\n\n${CREDIT_BLOCK}\n`);
     effort.data.history.push({ at: now(), event: "report written" });
   }
+  // A curation's article becomes its PDF every time the plan is written, so it's never a step to forget.
+  let article = null;
+  if (planPath && effort.data.article?.sections?.length) {
+    const result = await renderArticle(effort.data, path.join(effort.dir, `${effort.data.id}.pdf`)).catch((err) => fail(err.message));
+    article = result.file;
+    effort.data.history.push({ at: now(), event: "article pdf written (a4)" });
+  }
   await save(effort);
-  console.log(JSON.stringify({ report: effort.reportPath, data: effort.dataPath, status: effort.data.status }, null, 2));
+  console.log(JSON.stringify({ report: effort.reportPath, data: effort.dataPath, ...(article ? { pdf: article } : {}), status: effort.data.status }, null, 2));
 }
 
 /** sharp can't read HEIC or raw on most builds; macOS sips converts a full-size copy into tmp. */
@@ -353,6 +362,17 @@ const PRESETS = {
   web: { size: 2560, quality: 88, label: "2560 px JPEG, quality 88" },
   small: { size: 1200, quality: 82, label: "1200 px JPEG, quality 82" },
 };
+
+/** A frame's caption, keywords and readable text, from its catalogue entry (older efforts had `tags`). */
+function searchable(notes) {
+  if (!notes) return {};
+  const keywords = notes.keywords ?? notes.tags;
+  return {
+    ...(notes.caption ? { caption: notes.caption } : {}),
+    ...(keywords?.length ? { keywords } : {}),
+    ...(notes.text?.length ? { text: notes.text } : {}),
+  };
+}
 
 async function select(args) {
   const effort = await load(args[0] || fail("usage: select <_curate folder> (<n|file>... | --set <key>) [--preset original|large|web|small]"));
@@ -426,6 +446,8 @@ async function select(args) {
   }
   // Only our own temp folder; nothing in the source is ever removed.
   await fs.rm(tmp, { recursive: true, force: true });
+  // What the curator saw travels with each file, so an upload can carry it into search and alt text.
+  for (const f of files) Object.assign(f, searchable(byN.get(f.n).notes));
 
   const settings = copy
     ? { preset: "original", note: preset.label }

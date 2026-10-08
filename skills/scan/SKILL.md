@@ -1,6 +1,6 @@
 ---
 name: scan
-description: Index an archive of creative work, however large, and keep the index up to date, so an agent knows what's where, what's promising, what's been curated and what changed since last time, without looking at every file again. One _scan folder at the archive's root, updated in place. Use when the user says "scan", "index", "what's in my archive", "what changed", "what haven't I curated", before /curate or /contactsheet on a big or unfamiliar folder, and at the start of any work on an archive that may already have a scan. Never opens or changes a photo.
+description: Index an archive of creative work, however large, and keep the index up to date, so an agent knows what's where, what's promising, what's been curated and what changed since last time, without looking at every file again. One _scan folder at the archive's root, updated in place. Use when the user says "scan", "index", "what's in my archive", "what changed", "what haven't I curated", "find my photos of …" (search curated frames by keyword), before /curate or /contactsheet on a big or unfamiliar folder, and at the start of any work on an archive that may already have a scan. Never opens or changes a photo.
 ---
 
 # Scan
@@ -91,6 +91,9 @@ Read the `.md`. It's sized to read whole on any archive:
   curated, exports first, then the most images;
 - **already curated**: every `_curate_…` effort, with its status and
   selections;
+- **keywords**: what the curated frames show (`car`, `portrait`, `dusk`),
+  the most frames first, and in which folders. They come from each
+  curation's catalogue, so only curated work has them;
 - **raw only**: folders with raws and nothing viewable yet;
 - **folders**: the tree, as deep as fits, each folder in one line with the
   user's note;
@@ -122,7 +125,26 @@ marked as such. Write what helps choose: subject, client or occasion, year,
 medium, quality, and anything the user said ("skip, bad shoot"; "not to
 publish before March"). A note doesn't change the scan's date.
 
-## 5. Hand over
+## 5. Find: search what's been curated
+
+Like a phone's photo search, over everything /curate has looked at:
+
+```bash
+node <skill>/scripts/scan.mjs find "<folder>" car
+node <skill>/scripts/scan.mjs find "<folder>" car dusk      # both
+node <skill>/scripts/scan.mjs find "<folder>" "neon sign"
+```
+
+Each word (or phrase) must be in a frame's keywords, caption or readable
+text, as a whole word; `cars` finds `car`. It lists every matching frame
+with its file, folder, caption, keywords, the curation it's from and any
+selection it was exported in, so an agent can pick frames for a post or an
+upload straight from it. It reads the curations' own files, so new
+keywords show up at once; a curation made since the last scan needs an
+`update` first. Frames that were never curated have no keywords: curate
+the folder to make them findable.
+
+## 6. Hand over
 
 Say what's there in a few lines, the way a studio manager would: how big,
 how it's organised, what's promising, what's done, what changed. Then offer

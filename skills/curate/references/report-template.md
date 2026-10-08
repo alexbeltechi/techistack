@@ -86,8 +86,10 @@ Every frame as seen, for search and for whoever picks this up next.
 **<n> · `<file>`**: <one-line caption, plain, like alt text>
 <subjects> · <people: count, who if known, what they do> · <objects worth
 naming (makes, models, props)> · <place clues> · <time of day and light> ·
-<colour> · <mood> · <quality: sharp, soft, leak, duplicate of n> ·
-tags: <five to ten lowercase keywords>
+<colour> · <mood> · <quality: sharp, soft, leak, duplicate of n>
+keywords: <what someone would search for, specific to broad: land rover
+discovery, suv, car, vehicle, dirt road, dusk…>
+text: <words readable in the frame, exactly as written; leave out if none>
 
 <Repeat for every frame.>
 

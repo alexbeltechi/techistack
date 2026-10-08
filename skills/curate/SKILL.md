@@ -49,6 +49,11 @@ user's corrections, and they override the general guidance.
   on content, and never exclude a frame for what it depicts.
 - **Nothing is exported without the user's choice.** Report, then stop.
 - Picks always reference contact-sheet numbers; the script checks them.
+- **Only write about what you've seen.** If a sheet page comes back without
+  its image (e.g. "media removed: request limit"), you haven't seen it: read
+  it again, a few pages at a time, and if it still fails, stop and tell the
+  user which frames you couldn't see. Never fill in a frame from its file
+  name or its neighbours.
 
 ## 1. Brief
 
@@ -215,8 +220,21 @@ that voice. Captions, the catalogue and lists stay plain.
    (count, who if known, what they do), objects worth naming (makes and
    models: "Land Rover Discovery 3, roof rack, snorkel"), place clues, time of
    day and light, colour, mood, quality (sharp, soft, light leak, duplicate of
-   n) and five to ten tags. You've already looked at every frame; writing it
-   down makes the next search, summary or curation cheap.
+   n), **keywords** and **text**. You've already looked at every frame;
+   writing it down makes the next search, summary or curation cheap.
+
+   **Keywords** are what someone would type to find this frame, the way a
+   phone's photo search works: lowercase, singular, English. Every thing
+   in it goes from specific to broad, so the broad search finds it too:
+   `land rover discovery`, `suv`, `car`, `vehicle`. Then the place, the
+   scene, the activity, the light and the season (`dirt road`, `mountain`,
+   `camping`, `dusk`, `winter`). A short phrase is fine when it means more
+   than its words apart (`man on bicycle`, `neon sign`, `wedding toast`).
+   As many as someone might search for, usually 10 to 25. A make or model
+   only when you can really tell it; otherwise the broader word. A name only
+   when the user gave it or it's in a file or folder name.
+   **Text** is the words you can read in the frame (signs, shirts, labels,
+   screens), exactly as written. Leave it out when there are none.
 11. **Where it went**, and a closing line naming the agent and model that
     wrote it.
 
@@ -247,14 +265,21 @@ number or file name):
   "catalogue": [
     { "n": 1, "caption": "…", "subjects": ["…"], "people": "…",
       "objects": ["…"], "place": "…", "light": "…", "colour": "…",
-      "mood": "…", "quality": "…", "tags": ["…"] }
+      "mood": "…", "quality": "…",
+      "keywords": ["land rover discovery", "suv", "car", "vehicle", "…"],
+      "text": ["NO ENTRY"] }
   ]
 }
 ```
 
-The catalogue lands on each frame in `<id>.json` (`frames[].notes`).
+The catalogue lands on each frame in `<id>.json` (`frames[].notes`), and
+its caption, keywords and text travel with every export of that frame
+(`selection.json`), so an upload can carry them into a CMS for search and
+alt text. `tags` are not the curator's: they're what the user adds by hand
+later, so don't write them.
 
-Then lay the article out as a PDF next to the report:
+Writing a plan with an article lays it out as a PDF next to the report, every
+time (the `write` output names it). To redo it on other paper:
 
 ```bash
 node <skill>/scripts/curate.mjs pdf "<_curate folder>" [--paper a4|letter]
@@ -262,8 +287,8 @@ node <skill>/scripts/curate.mjs pdf "<_curate folder>" [--paper a4|letter]
 
 Title, date, the summary, then each section: the observation in a reading
 column, its frames across the full page width, in justified rows with
-contact-sheet edge text (folder · number · file), and the caption under
-them. Always on white (the contact sheets also come on black; the article
+contact-sheet edge text (folder · number · file), each frame's keywords
+under it, and the section's caption under the rows. Always on white (the contact sheets also come on black; the article
 doesn't). A4 by default; real text, so it prints, reads aloud, and an AI can
 read it. A section's observation stays on the page with its first row of
 images, and the caption with its last.

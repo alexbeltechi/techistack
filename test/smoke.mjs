@@ -258,12 +258,20 @@ fs.writeFileSync(
         { heading: "Broken", observation: "These don't render.", frames: ["broken", "zero", "web"] },
       ],
     },
+    catalogue: [
+      { n: "panorama", caption: "An SUV on a dirt road at dusk.", keywords: ["land rover discovery", "suv", "car", "vehicle", "dirt road", "dusk", "a long phrase that has to wrap under a narrow image"], text: ["NO ENTRY"] },
+      // An older effort's catalogue, with tags instead of keywords.
+      { n: "tall.png", caption: "Cars by the sea.", tags: ["cars", "beach"] },
+    ],
   }),
 );
 await check("curate sheet into the effort", () => json(CS, "sheet", path.join(A, "road trip"), "--max", "all", "--out", effort).shown === 9);
 // External drives add `._…` shadow files next to every file (macOS AppleDouble).
 fs.writeFileSync(path.join(effort, `._${path.basename(effort)}_road-trip.json`), "\u0000\u0005\u0016\u0007    Mac OS X");
-await check("write", () => json(CU, "write", effort, "--report", report, "--plan", plan).status === "proposed");
+await check("write: the plan's article becomes its PDF", () => {
+  const w = json(CU, "write", effort, "--report", report, "--plan", plan);
+  return w.status === "proposed" && fs.existsSync(w.pdf);
+});
 await check("bad plan JSON is a plain error", () => {
   fs.writeFileSync(path.join(scratch, "bad.json"), "nope");
   return fails(CU, "write", effort, "--plan", path.join(scratch, "bad.json"));
@@ -291,6 +299,26 @@ await check("transparent exports on white, rotation applied, no metadata", async
 });
 await check("report credit stays last", () => fs.readFileSync(path.join(effort, `${path.basename(effort)}_road-trip.md`), "utf8").trimEnd().endsWith("</sub>"));
 await check("status", () => json(CU, "status", effort).status === "selected");
+await check("selection.json carries caption, keywords and text", () => {
+  const sel = path.join(effort, fs.readdirSync(effort).filter((d) => d.startsWith("selection_")).sort()[0]);
+  const files = JSON.parse(fs.readFileSync(path.join(sel, "selection.json"), "utf8")).files;
+  const pano = files.find((f) => f.source.includes("panorama"));
+  const tall = files.find((f) => f.source.includes("tall"));
+  return pano.keywords.includes("car") && pano.text[0] === "NO ENTRY" && pano.caption.startsWith("An SUV") && tall.keywords[0] === "cars" && !files.find((f) => f.source.includes("web")).keywords;
+});
+await check("article pdf lists the keywords", async () => {
+  const doc = await PDFDocument.load(fs.readFileSync(path.join(effort, `${path.basename(effort)}_road-trip.pdf`)));
+  return doc.getKeywords().includes("land rover discovery");
+});
+await check("scan: keywords in the map, find by word", () => {
+  const up = json(SC, "update", A);
+  const map = fs.readFileSync(up.md, "utf8");
+  const car = json(SC, "find", A, "car");
+  const both = json(SC, "find", path.join(A, "road trip"), "cars", "dusk");
+  const none = json(SC, "find", A, "carpet");
+  const phrase = json(SC, "find", A, "no entry");
+  return map.includes("## Keywords") && map.includes("**car**") && car.found === 2 && both.found === 1 && both.frames[0].exported.length > 0 && none.found === 0 && phrase.found === 1;
+});
 
 // The rule above all: originals untouched, and only our dated folders added.
 const after = snapshot();

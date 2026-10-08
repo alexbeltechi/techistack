@@ -101,7 +101,8 @@ e.g. the scratchpad for a quick look, but never inside a source folder.
   extension): they aren't on the sheet or in the numbering, and the manifest
   lists them under `excluded`. The originals are untouched.
 
-Output, about 350 KB per page each, in that folder:
+The PDFs embed every image at 300 ppi, so a printed sheet stays sharp (about
+100 KB a frame); the JPG pages are sized for screens. In that folder:
 Every file is named after its sheet folder, its colour and what it shows, so
 each one makes sense on its own (emailed, printed, dropped in a chat). The id
 is the folder plus the subject, e.g. `contactsheet_2026-10-08-3_2025-Aug`. The
@@ -121,7 +122,11 @@ stand alone (`Aug` → `2025-Aug`); `--name` sets it.
 ## 3. Show
 
 Look at each white JPG page yourself (Read the image; the black pages are the
-same), then send the PDFs and the JPGs, white and black, to the user
+same). **Make sure you actually see it.** If a Read comes back without the
+image (for example "media removed: request limit"), you haven't seen that
+page: read it again, a few pages at a time, and if it still doesn't come
+through, stop and tell the user. Never describe frames you haven't seen.
+Then send the PDFs and the JPGs, white and black, to the user
 (SendUserFile). Describe what you see in a few lines: the
 shoots inside, the strongest frames by number, near-duplicates, anything that
 looks mislabelled (another person's shoot in this folder). Don't comment on

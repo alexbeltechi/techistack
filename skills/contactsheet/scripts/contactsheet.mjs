@@ -321,7 +321,8 @@ const L = {
   text: 6.5, // edge text size: folder, number and filename alike
   gutter: 4, // between the three pieces of edge text
   footerGap: 14, // between the images and the footer line
-  scale: 3,
+  scale: 3, // JPG pages: pixels per point
+  print: 300 / 72, // PDF images: 300 ppi, print quality
 };
 /** The brand, at the right end of the footer line, as the user would type it. */
 const BRAND = "/techistack";
@@ -639,7 +640,7 @@ async function sheet(opts) {
   const picked = sampled ? sampled.picked : spread(pool, Math.min(opts.max, pool.length));
   const n = picked.length;
 
-  const imagePx = 1400; // working size; each image is scaled to its frame below
+  const imagePx = 2400; // working size; each image is scaled to its frame below
   // A few at a time: HEIC and raw each start a sips process.
   const frames = await mapLimit(picked, Math.max(2, os.cpus().length), async (f, i) => {
     const frame = {
@@ -673,12 +674,12 @@ async function sheet(opts) {
   const loaded = frames.filter((f) => f.image);
   const page = pageFor(opts.paper, opts.cols || 4);
   const rows = rowsOf(frames, page);
-  // Each image at its frame size × SCALE: sharp on retina and phones, still small.
+  // Each image at its frame size at 300 ppi, so a printed sheet isn't soft; the JPG pages scale it down.
   await Promise.all(
     loaded.map(async (f) => {
       const { data, info } = await sharp(f.image.jpeg)
-        .resize(Math.ceil(f.size.w * L.scale), Math.ceil(f.size.h * L.scale), { fit: "inside", withoutEnlargement: true })
-        .jpeg({ quality: 80, mozjpeg: true })
+        .resize(Math.ceil(f.size.w * L.print), Math.ceil(f.size.h * L.print), { fit: "inside", withoutEnlargement: true })
+        .jpeg({ quality: 85, mozjpeg: true })
         .toBuffer({ resolveWithObject: true });
       f.image = { ...f.image, jpeg: data };
     }),

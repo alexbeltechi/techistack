@@ -3,7 +3,8 @@
  * effort's `article` (title, sections of text and frames) and summary.
  *
  * Text sits in a reading column; images use the full page width in justified
- * rows, each with contact-sheet edge text (folder · number · file). Real text
+ * rows, each with contact-sheet edge text (folder · number · file) and the
+ * frame's keywords under it. Real text
  * throughout, so it prints and an AI can read it. A4 by default, or Letter.
  */
 
@@ -27,7 +28,10 @@ const L = {
   edge: 6, // edge text size
   rowHeight: 190, // target height of an image row
   maxImage: 440, // tallest a single image may be
-  scale: 2.5, // embedded image pixels per point
+  scale: 300 / 72, // embedded image pixels per point: 300 ppi, print quality
+  keywords: 6.5, // keywords under each image
+  keywordsLeading: 8.5,
+  keywordsGap: 4, // between an image and its keywords
 };
 const BRAND = "/techistack";
 const REPO_URL = "https://github.com/alexbeltechi/techistack";
@@ -122,6 +126,9 @@ function rows(items, width) {
   return best.rows.map((row) => ({ items: row, height: Math.min(L.maxImage, heightOf(row)) }));
 }
 
+/** A frame's keywords from its catalogue entry (older efforts had `tags`), as one line to wrap. */
+const keywordsOf = (fr) => (fr.notes?.keywords ?? fr.notes?.tags ?? []).map(String).join(" · ");
+
 async function readable(file, tmp) {
   if (/\.(jpe?g|png|webp|tiff?|avif|gif)$/i.test(file)) return file;
   if (process.platform !== "darwin") return null;
@@ -145,6 +152,12 @@ export async function renderArticle(data, file, { paper = "a4" } = {}) {
   const fullW = W - L.side * 2;
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "curate-pdf-"));
   const byN = new Map(data.frames.map((fr) => [fr.n, fr]));
+  // Each image's keywords, wrapped to its width; a row is as tall as its longest.
+  const labels = (row) => row.items.map((it) => (keywordsOf(it.fr) ? wrap(keywordsOf(it.fr), it.ratio * row.height, f.sans, L.keywords) : []));
+  const labelHeight = (lines) => {
+    const most = Math.max(0, ...lines.map((l) => l.length));
+    return most ? L.keywordsGap + most * L.keywordsLeading : 0;
+  };
 
   let page;
   let y; // from the top
@@ -197,7 +210,7 @@ export async function renderArticle(data, file, { paper = "a4" } = {}) {
     const textHeight =
       (section.heading ? 22 : 0) + paras.reduce((sum, p) => sum + wrap(p, L.column, f.serif, 11.5).length * 17 + 9, 0) + 6;
     // (Only when that fits on one page; a longer observation just flows on.)
-    const keep = textHeight + (sectionRows[0]?.height ?? 0);
+    const keep = textHeight + (sectionRows[0] ? sectionRows[0].height + labelHeight(labels(sectionRows[0])) : 0);
     if (y > L.top && room() < keep && keep <= H - 2 * L.top) newPage();
 
     if (section.heading) text(section.heading, { font: f.sansBold, size: 12, leading: 18, after: 4 });
@@ -205,21 +218,27 @@ export async function renderArticle(data, file, { paper = "a4" } = {}) {
     y += 6;
 
     for (const [r, row] of sectionRows.entries()) {
-      // The last row keeps the caption with it.
-      const need = row.height + (r === sectionRows.length - 1 ? captionHeight : 0);
+      // Each row keeps its keywords with it, and the last row the caption.
+      const rowLabels = labels(row);
+      const under = labelHeight(rowLabels);
+      const need = row.height + under + (r === sectionRows.length - 1 ? captionHeight : 0);
       if (room() < need) newPage();
       const used = row.items.reduce((s, it) => s + it.ratio * row.height, 0) + row.items.length * (L.strip + L.stripGap) + (row.items.length - 1) * L.gap;
       let x = L.side + (fullW - used) / 2;
-      for (const it of row.items) {
+      for (const [k, it] of row.items.entries()) {
         const w = it.ratio * row.height;
         const jpg = await sharp(it.src)
           .rotate()
-          .resize(Math.ceil(w * L.scale), Math.ceil(row.height * L.scale), { fit: "inside" })
-          .jpeg({ quality: 80, mozjpeg: true })
+          .resize(Math.ceil(w * L.scale), Math.ceil(row.height * L.scale), { fit: "inside", withoutEnlargement: true })
+          .jpeg({ quality: 85, mozjpeg: true })
           .toBuffer();
         const img = await doc.embedJpg(jpg);
         const ix = x + L.strip + L.stripGap;
         page.drawImage(img, { x: ix, y: H - y - row.height, width: w, height: row.height });
+        for (const [l, line] of rowLabels[k].entries()) {
+          const top = y + row.height + L.keywordsGap + l * L.keywordsLeading;
+          page.drawText(line, { x: ix, y: H - top - L.keywords, size: L.keywords, font: f.sans, color: INK.dim });
+        }
 
         // Contact-sheet edge text, climbing the image: folder · number · file.
         const m = (s) => f.sans.widthOfTextAtSize(winAnsi(s), L.edge);
@@ -237,7 +256,7 @@ export async function renderArticle(data, file, { paper = "a4" } = {}) {
         if (fileFit) put(fileFit + ext, row.height - m(fileFit + ext));
         x += L.strip + L.stripGap + w + L.gap;
       }
-      y += row.height + L.gap;
+      y += row.height + under + L.gap;
     }
     if (caption) text(caption, { font: f.sans, size: 8.5, leading: 12, color: INK.dim, after: 0 });
     y += 22;
@@ -263,7 +282,7 @@ export async function renderArticle(data, file, { paper = "a4" } = {}) {
   // Document info takes any text (only the drawn text is limited to WinAnsi).
   doc.setTitle(String(article.title || data.id));
   doc.setSubject(String(data.summary || ""));
-  doc.setKeywords([...new Set(data.frames.flatMap((fr) => fr.notes?.tags || []))].map(String));
+  doc.setKeywords([...new Set(data.frames.flatMap((fr) => fr.notes?.keywords ?? fr.notes?.tags ?? []))].map(String));
   await fs.writeFile(file, await doc.save());
   await fs.rm(tmp, { recursive: true, force: true });
   return { file, pages: pages.length, bytes: (await fs.stat(file)).size };

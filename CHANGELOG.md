@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.6.0 — 2026-10-08
+
+- **Keywords, for search like a phone's photos:** `/curate`'s catalogue now
+  gives every frame `keywords` (lowercase, singular, English, specific to
+  broad, so `land rover discovery` also says `suv`, `car`, `vehicle`) and
+  `text` (the words you can read in the frame), in place of `tags`. Tags are
+  left for the user to add by hand later. Older efforts' tags still count
+  as keywords.
+- **Exports carry them:** every file in `selection.json` has the frame's
+  `caption`, `keywords` and `text`, ready for an upload to put into a CMS.
+- **The article PDF is always made:** `write` with a plan that has an
+  article now lays it out (A4) itself, so it's no longer a step that gets
+  forgotten; `pdf` is for redoing it, e.g. on Letter. Each image has its
+  keywords under it.
+- **`/scan` finds what's been curated:** the map has a "Keywords" section
+  (what the curated frames show, and where), and `scan.mjs find <folder>
+  car [dusk]` lists every matching frame with its file, caption, curation
+  and the selections it's in. It reads the curations' own files; it still
+  never opens a photo.
+- **Print quality:** contact sheet and article PDFs now embed images at 300
+  ppi (JPEG quality 85), up from 216 ppi and 180 ppi (quality 80), so printed
+  sheets aren't soft. PDFs are about twice the size; the JPG pages are
+  unchanged.
+- `/curate` and `/contactsheet`: an agent must confirm it actually sees each
+  sheet page. A page that comes back without its image ("media removed") is
+  read again or reported, never described.
+
 ## 0.5.0 — 2026-10-08
 
 - **`/scan`**, a third skill: a map of an archive, however large, in one
