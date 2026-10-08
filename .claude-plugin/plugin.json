@@ -1,6 +1,6 @@
 {
   "name": "techistack",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Agent skills for curating creative work: numbered contact sheets you can mark up, and a curator that proposes what to show, in what order and for whom. Never deletes anything.",
   "author": {
     "name": "Alex Beltechi",

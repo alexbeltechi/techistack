@@ -21,7 +21,8 @@
  * `-2`, `-3`… for more runs that day) inside the folder given, or inside the
  * folders' common parent when there are several. That new folder is the only
  * thing ever created in a source; existing files are never touched.
- *   --name <name>     sheet name (default: the first folder's name)
+ *   --name <name>     what the sheet shows, in the filenames (default: the folder
+ *                     name, with its parent when it's short, e.g. "2025-Aug")
  *   --max <n|all>     frames to show (default 20, evenly spaced across the set)
  *   --paper <p>       3x4 (default) | a4 | letter
  *   --cols <n>        columns (default 4, or 3 when most frames are landscape)
@@ -30,8 +31,9 @@
  *                     ignores Lightroom/XMP edits)
  *   --depth <n>       how deep to look (default: unlimited)
  *
- * Writes <out>/<name>.pdf (all pages), <out>/<name>-01.jpg… and
- * <out>/<name>.json (frame number → source file).
+ * Each file is named after its sheet folder and what it shows, so it makes
+ * sense on its own: contactsheet_2026-10-08-3_2025-Aug.pdf (all pages),
+ * …_p01.jpg per page, and .json (frame number → source file).
  */
 
 import fs from "node:fs/promises";
@@ -193,6 +195,13 @@ async function facts(file, readable) {
     out.dateSource = "mtime";
   }
   return out;
+}
+
+/** A folder name that stands on its own: "Aug" alone says little, "2025-Aug" does. */
+function sourceLabel(folder) {
+  const base = path.basename(folder);
+  const vague = base.length <= 4 || /^\d+$/.test(base) || /^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*$/i.test(base);
+  return vague ? `${path.basename(path.dirname(folder))}-${base}` : base;
 }
 
 /** sharp can't read HEIC or raw on most builds; macOS sips can. Converts into tmp. */
@@ -466,7 +475,7 @@ async function sheet(opts) {
   if (!["pdf", "jpg", "both"].includes(opts.format)) throw new Error("--format is pdf, jpg or both.");
   if (!PAPER[opts.paper]) throw new Error("--paper is 3x4, a4 or letter.");
 
-  const name = (opts.name || path.basename(opts.folders[0])).replace(/[^\w.-]+/g, "-");
+  const subject = (opts.name || opts.folders.map(sourceLabel).join("+")).replace(/[^\w.+-]+/g, "-");
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "contactsheet-"));
 
   const all = (await Promise.all(opts.folders.map((f) => walk(f, opts.depth)))).flat();
@@ -554,22 +563,28 @@ async function sheet(opts) {
     }),
   );
 
+  // Every file carries the sheet's full id, so one emailed on its own still says
+  // what it is: contactsheet_2026-10-08-3_2025-Aug_p01.jpg
+  const sheetDir = path.basename(out);
+  const id = `${SHEET_DIR.test(sheetDir) ? sheetDir : `contactsheet_${today}`}_${subject}`;
   const written = [];
   if (opts.format !== "jpg") {
-    const pdf = path.join(out, `${name}.pdf`);
-    await renderPdf(pages, pdf, sources);
+    const pdf = path.join(out, `${id}.pdf`);
+    await renderPdf(pages, pdf, id);
     written.push(pdf);
   }
   if (opts.format !== "pdf") {
     for (const [i, p] of pages.entries()) {
-      const jpg = path.join(out, `${name}-${String(i + 1).padStart(2, "0")}.jpg`);
+      const jpg = path.join(out, `${id}_p${String(i + 1).padStart(2, "0")}.jpg`);
       await renderJpg(p, jpg);
       written.push(jpg);
     }
   }
 
   const manifest = {
-    name,
+    id,
+    subject,
+    created: new Date().toISOString(),
     folders: opts.folders,
     total: pool.length,
     shown: n,
@@ -591,7 +606,7 @@ async function sheet(opts) {
       place: f.place ? { page: f.place.page, x: +f.place.x.toFixed(1), y: +f.place.y.toFixed(1), w: +f.place.w.toFixed(1), h: +f.place.h.toFixed(1) } : null,
     })),
   };
-  const manifestPath = path.join(out, `${name}.json`);
+  const manifestPath = path.join(out, `${id}.json`);
   await fs.writeFile(manifestPath, JSON.stringify(manifest, null, 2));
 
   const sizes = await Promise.all(written.map(async (f) => `${path.basename(f)} ${Math.round((await fs.stat(f)).size / 1024)} KB`));

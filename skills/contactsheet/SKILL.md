@@ -82,10 +82,16 @@ e.g. the scratchpad for a quick look, but never inside a source folder.
 - `--depth 0` for one folder without its subfolders; `--name` to name it.
 
 Output, about 350 KB per page each, in that folder:
-- `<name>.pdf`: every page, with real (selectable) text. Best for marking up
+Every file is named after its sheet folder and what it shows, so each one
+makes sense on its own (emailed, printed, dropped in a chat), e.g.
+`contactsheet_2026-10-08-3_2025-Aug`. The subject is the folder's name, with
+its parent when the name is too short to stand alone (`Aug` → `2025-Aug`);
+`--name` sets it.
+
+- `<id>.pdf`: every page, with real (selectable) text. Best for marking up
   on a phone: Files › Markup, circle or cross out frames.
-- `<name>-01.jpg…`: the same pages as images, for quick viewing.
-- `<name>.json`: the manifest (`frames[].n` → `path`).
+- `<id>_p01.jpg…`: the same pages as images, for quick viewing.
+- `<id>.json`: the manifest (`frames[].n` → `path`).
 
 `--format pdf|jpg` for only one of them.
 
@@ -113,7 +119,7 @@ tiny rotated numbers.
 Resolve numbers through the manifest, never by guessing filenames:
 
 ```bash
-node <skill>/scripts/contactsheet.mjs pick "<name>.json" 7 12 15
+node <skill>/scripts/contactsheet.mjs pick "<id>.json" 7 12 15
 ```
 
 The picks are what goes further: into `/curate`, a publishing tool, a print
@@ -121,7 +127,7 @@ order or a retouching list.
 
 ## The manifest
 
-`<name>.json` is the sheet as data, for the next agent or step:
+`<id>.json` is the sheet as data (with `id`, `subject` and `created`), for the next agent or step:
 
 - `frames[]`: `n` (the printed number), `path` (the exact file), `kind`,
   `folder`, `ok` (rendered or not), `width`, `height`, `orientation`,

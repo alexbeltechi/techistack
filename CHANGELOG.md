@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.1 — 2026-10-08
+
+- `/contactsheet`: every file is named after its sheet folder and what it
+  shows, so a PDF, JPG or JSON sent on its own still says what it is:
+  `contactsheet_2026-10-08-3_2025-Aug.pdf`, `…_p01.jpg`, `….json`. Short
+  folder names get their parent (`Aug` → `2025-Aug`); `--name` sets it. The
+  manifest gains `id`, `subject` and `created`.
+
 ## 0.1.0 — 2026-10-08
 
 First public version. Beta: the recipe is still changing.
