@@ -13,7 +13,7 @@ import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import sharp from "sharp";
-import { PDFDocument, StandardFonts, rgb, degrees } from "pdf-lib";
+import { PDFDocument, PDFString, StandardFonts, rgb, degrees } from "pdf-lib";
 
 const run = promisify(execFile);
 const PAPER = { a4: [595.28, 841.89], letter: [612, 792] };
@@ -29,6 +29,8 @@ const L = {
   maxImage: 440, // tallest a single image may be
   scale: 2.5, // embedded image pixels per point
 };
+const MADE_WITH = "Made with techistack";
+const REPO_URL = "https://github.com/alexbeltechi/techistack";
 const INK = { text: rgb(0.1, 0.1, 0.1), dim: rgb(0.45, 0.45, 0.45) };
 
 /** Standard PDF fonts cover WinAnsi: strip diacritics, keep typographic punctuation, replace the rest. */
@@ -241,6 +243,17 @@ export async function renderArticle(data, file, { paper = "a4" } = {}) {
   pages.forEach((p, i) => {
     const line = winAnsi(`${data.id}  ·  ${i + 1} / ${pages.length}`);
     p.drawText(line, { x: (W - f.sans.widthOfTextAtSize(line, 6.5)) / 2, y: L.top / 2, size: 6.5, font: f.sans, color: INK.dim });
+    const mw = f.sans.widthOfTextAtSize(MADE_WITH, 6.5);
+    const mx = (W - mw) / 2;
+    p.drawText(MADE_WITH, { x: mx, y: L.top / 2 - 10, size: 6.5, font: f.sans, color: INK.dim });
+    const annot = doc.context.obj({
+      Type: "Annot",
+      Subtype: "Link",
+      Rect: [mx, L.top / 2 - 12, mx + mw, L.top / 2 - 2],
+      Border: [0, 0, 0],
+      A: { Type: "Action", S: "URI", URI: PDFString.of(REPO_URL) },
+    });
+    p.node.addAnnot(doc.context.register(annot));
   });
 
   doc.setTitle(winAnsi(article.title || data.id));

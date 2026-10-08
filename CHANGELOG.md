@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.0 — 2026-10-08
+
+- Every document techistack makes now carries a small "Made with techistack"
+  credit linking to the GitHub repo, so people can find the tool: contact
+  sheets (PDF and JPG), the article PDF and the curator's report. In the PDFs
+  it's a clickable link.
+
 ## 0.2.1 — 2026-10-08
 
 - `/contactsheet --exclude`: leave named frames out of a sheet. They don't

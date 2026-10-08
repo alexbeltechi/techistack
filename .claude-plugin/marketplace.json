@@ -9,7 +9,7 @@
       "name": "techistack",
       "source": "./",
       "description": "Agent skills for curating creative work: /contactsheet and /curate.",
-      "version": "0.2.1"
+      "version": "0.3.0"
     }
   ]
 }

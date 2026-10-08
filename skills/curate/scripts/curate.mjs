@@ -205,7 +205,8 @@ async function write(args) {
   if (reportDraft) {
     const body = await fs.readFile(reportDraft, "utf8");
     if (!body.trimStart().startsWith(MARKER)) fail(`the report must start with ${MARKER}`);
-    await fs.writeFile(effort.reportPath, body);
+    const credit = "Made with [techistack](https://github.com/alexbeltechi/techistack)";
+    await fs.writeFile(effort.reportPath, body.includes(credit) ? body : `${body.trimEnd()}\n\n---\n\n<sub>${credit}</sub>\n`);
     effort.data.history.push({ at: now(), event: "report written" });
   }
   await save(effort);

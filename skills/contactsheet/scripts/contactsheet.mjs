@@ -47,7 +47,7 @@ import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import sharp from "sharp";
-import { PDFDocument, StandardFonts, rgb, degrees } from "pdf-lib";
+import { PDFDocument, PDFString, StandardFonts, rgb, degrees } from "pdf-lib";
 
 const run = promisify(execFile);
 
@@ -280,6 +280,8 @@ const L = {
   tallest: 1.6, // an image is at most this many times as tall as the column is wide
   scale: 3,
 };
+const MADE_WITH = "Made with techistack";
+const REPO_URL = "https://github.com/alexbeltechi/techistack";
 const INK = { paper: [1, 1, 1], text: [0.1, 0.1, 0.1], dim: [0.45, 0.45, 0.45], edge: [0.82, 0.82, 0.82] };
 const css = ([r, g, b]) => `rgb(${Math.round(r * 255)},${Math.round(g * 255)},${Math.round(b * 255)})`;
 
@@ -415,6 +417,8 @@ function layoutPage({ columns, page, footer, measure, pageNumber }) {
 
   const footerY = L.top + (contentH - tallest) / 2 + tallest + L.footerGap + L.text;
   ops.push({ t: "text", x: (width - measure(footer, L.text)) / 2, y: footerY, size: L.text, text: footer, fill: INK.text });
+  const mark = L.text - 1;
+  ops.push({ t: "text", x: (width - measure(MADE_WITH, mark)) / 2, y: height - L.top / 2, size: mark, text: MADE_WITH, fill: INK.dim, link: REPO_URL, w: measure(MADE_WITH, mark) });
   return { width, height, ops };
 }
 
@@ -440,6 +444,16 @@ async function renderPdf(pages, file, title) {
           color: rgb(...op.fill),
           ...(op.t === "vtext" ? { rotate: degrees(90) } : {}),
         });
+        if (op.link) {
+          const annot = doc.context.obj({
+            Type: "Annot",
+            Subtype: "Link",
+            Rect: [op.x, Y(op.y) - 2, op.x + op.w, Y(op.y) + op.size],
+            Border: [0, 0, 0],
+            A: { Type: "Action", S: "URI", URI: PDFString.of(op.link) },
+          });
+          page.node.addAnnot(doc.context.register(annot));
+        }
       }
     }
   }
