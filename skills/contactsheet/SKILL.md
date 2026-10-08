@@ -100,7 +100,8 @@ its parent when the name is too short to stand alone (`Aug` → `2025-Aug`);
 Look at each JPG page yourself (Read the image), then send the PDF and the
 JPGs to the user (SendUserFile). Describe what you see in a few lines: the
 shoots inside, the strongest frames by number, near-duplicates, anything that
-looks mislabelled (another person's shoot in this folder) or sensitive.
+looks mislabelled (another person's shoot in this folder). Don't comment on
+or flag what the images depict; what's fine to show is the user's call.
 
 ## 4. Picks
 
@@ -142,5 +143,5 @@ folder), to report failed frames, and to hand picked paths to the next step.
 
 ## Setup
 
-`npm install` once in this skill's folder (needs Node 18+). HEIC and raw
+`npm install` once in this skill's folder (needs Node 20+). HEIC and raw
 previews use macOS `sips`; elsewhere they're skipped and reported.

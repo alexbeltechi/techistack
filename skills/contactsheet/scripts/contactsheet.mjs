@@ -15,7 +15,9 @@
  *   node contactsheet.mjs pick <manifest.json> 3 7 12    frame numbers → files
  *
  * Options (sheet):
- *   --out <dir>       write somewhere else (must be outside the source folders)
+ *   --out <dir>       write somewhere else: outside the source folders, or a
+ *                     /curate effort's `_curate_…` folder (a new dated
+ *                     contactsheet_ folder is made inside it)
  *
  * By default each run writes a new folder `contactsheet_YYYY-MM-DD` (ISO 8601;
  * `-2`, `-3`… for more runs that day) inside the folder given, or inside the
@@ -70,7 +72,7 @@ async function walk(dir, depth, out = []) {
     return out;
   }
   for (const e of entries) {
-    if (e.name.startsWith(".") || SHEET_DIR.test(e.name)) continue;
+    if (e.name.startsWith(".") || SHEET_DIR.test(e.name) || CURATE_DIR.test(e.name)) continue;
     const full = path.join(dir, e.name);
     if (e.isDirectory()) await walk(full, depth - 1, out);
     else if (e.isFile()) {
@@ -136,6 +138,8 @@ const inside = (child, parent) => {
 
 /** Our own output folders, skipped when scanning so sheets never land on sheets. */
 const SHEET_DIR = /^contactsheet_\d{4}-\d{2}-\d{2}(-\d+)?$/;
+/** /curate's folders hold prepared copies; never show them as originals. */
+const CURATE_DIR = /^_curate_\d{4}-\d{2}-\d{2}(-\d+)?$/;
 
 function commonParent(folders) {
   let base = folders[0];
@@ -169,7 +173,9 @@ async function facts(file, readable) {
     const swap = (meta.orientation || 1) >= 5;
     out.width = swap ? meta.height : meta.width;
     out.height = swap ? meta.width : meta.height;
-    out.orientation = out.width > out.height ? "landscape" : out.width < out.height ? "portrait" : "square";
+    // Within 2% counts as square (6×6 scans are a few pixels off).
+    const ratio = out.width / out.height;
+    out.orientation = ratio > 1.02 ? "landscape" : ratio < 0.98 ? "portrait" : "square";
     const match = meta.exif?.toString("latin1").match(/(\d{4}):(\d{2}):(\d{2}) (\d{2}):(\d{2}):(\d{2})/);
     if (match) {
       const [, y, mo, d, h, mi, sec] = match;
@@ -489,9 +495,12 @@ async function sheet(opts) {
   if (opts.out) {
     out = path.resolve(opts.out);
     for (const f of opts.folders) {
-      if (inside(out, f)) throw new Error(`--out ${out} is inside a source folder (${f}). Leave --out off to get a dated contactsheet folder there.`);
+      // A /curate effort folder is ours too: its sheet lives with its report.
+      if (inside(out, f) && !CURATE_DIR.test(path.basename(out))) throw new Error(`--out ${out} is inside a source folder (${f}). Leave --out off to get a dated contactsheet folder there.`);
     }
-    await fs.mkdir(out, { recursive: true });
+    // In a /curate effort, each sheet gets its own dated folder, so an effort can hold several.
+    if (CURATE_DIR.test(path.basename(out))) out = await newSheetDir(out);
+    else await fs.mkdir(out, { recursive: true });
   } else {
     // Next to the photos: the deepest folder that holds all of them.
     out = await newSheetDir(commonParent([...new Set(pool.map((f) => path.dirname(f.path)))]));
@@ -532,7 +541,7 @@ async function sheet(opts) {
   await fs.rm(tmp, { recursive: true, force: true });
 
   const loaded = frames.filter((f) => f.image);
-  const landscape = loaded.filter((f) => f.image.w > f.image.h).length > loaded.length / 2;
+  const landscape = loaded.filter((f) => f.image.w > f.image.h * 1.02).length > loaded.length / 2;
   const page = pageFor(opts.paper, opts.cols || (landscape ? 3 : 4));
   for (const f of frames) f.size = frameSize(f, page.imgW);
   // Each image at its frame size × SCALE: sharp on retina and phones, still small.

@@ -1,7 +1,7 @@
 {
   "name": "techistack",
-  "version": "0.1.1",
-  "description": "Agent skills for curating creative work: numbered contact sheets you can mark up, and a curator that proposes what to show, in what order and for whom. Never deletes anything.",
+  "version": "0.2.0",
+  "description": "Agent skills for curating creative work: numbered contact sheets you can mark up, and a curator with a voice that reports on your work, writes an article and exports your picks. Never deletes anything. Beta: run it on a copy.",
   "author": {
     "name": "Alex Beltechi",
     "url": "https://beltechi.com"
@@ -9,5 +9,11 @@
   "homepage": "https://github.com/alexbeltechi/techistack",
   "repository": "https://github.com/alexbeltechi/techistack",
   "license": "MIT",
-  "keywords": ["photography", "curation", "contact-sheet", "archive", "portfolio"]
+  "keywords": [
+    "photography",
+    "curation",
+    "contact-sheet",
+    "archive",
+    "portfolio"
+  ]
 }

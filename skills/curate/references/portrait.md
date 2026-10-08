@@ -42,7 +42,3 @@ sitter wants to see how the photographer sees people.
 Title with the person's name (as the user does: "Ada", "Carla Cristea").
 The description, if any: when, where, what the shoot was. No adjectives about
 the photos.
-
-## Ask about
-
-Nudity or implied nudity, minors, and anyone who might not want to be online.

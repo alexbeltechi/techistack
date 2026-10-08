@@ -1,0 +1,10 @@
+{
+  "name": "curate",
+  "private": true,
+  "type": "module",
+  "description": "Prepare a curated selection: web-sized, high-quality copies in a new _curate folder. Read-only on sources.",
+  "dependencies": {
+    "sharp": "^0.34.5",
+    "pdf-lib": "^1.17.1"
+  }
+}
