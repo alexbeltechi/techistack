@@ -16,7 +16,7 @@ user and for any agent that comes later:
   _curate_2026-10-08_2025-Aug.md        the curator's report: one file, everything in it
   _curate_2026-10-08_2025-Aug.json      the same as data
   _curate_2026-10-08_2025-Aug.pdf       the article: presentable, printable
-  contactsheet_2026-10-08/              a contact sheet (pdf, jpg pages, manifest)
+  contactsheet_2026-10-08/              a contact sheet (pdf, jpg pages, on white and black; manifest)
   contactsheet_2026-10-08-2/            another look, if one is made
   selection_2026-10-08/                 an export package, when the user asks
   selection_2026-10-08-2/               another one
@@ -184,7 +184,8 @@ node <skill>/scripts/curate.mjs pdf "<_curate folder>" [--paper a4|letter]
 Title, date, the summary, then each section: the observation in a reading
 column, its frames across the full page width, in justified rows with
 contact-sheet edge text (folder · number · file), and the caption under
-them. A4 by default; real text, so it prints, reads aloud, and an AI can
+them. Always on white (the contact sheets also come on black; the article
+doesn't). A4 by default; real text, so it prints, reads aloud, and an AI can
 read it. A section's observation stays on the page with its first row of
 images, and the caption with its last.
 

@@ -10,7 +10,7 @@ agents are good at moving files and bad at taste. hand one an archive and say "p
 
 **it never deletes anything.** this is people's archive and backup work. sources are read-only. the only things it adds are new `contactsheet_…` and `_curate_…` folders next to your work.
 
-**you choose the way photographers always have.** every contact sheet comes as a PDF and JPG. circle the frames you want on your phone (Files › Markup), cross out the rest, or print it and use a pen. or just write the numbers: "7, 12, 15". your picks go further, into publishing, print, retouching or production.
+**you choose the way photographers always have.** every contact sheet comes as a PDF and JPG, on white and on black. circle the frames you want on your phone (Files › Markup), cross out the rest, or print it and use a pen. or just write the numbers: "7, 12, 15". your picks go further, into publishing, print, retouching or production.
 
 **the curator has a voice.** someone with art running through them, talking to us, the audience, the way a good Nowness film sounds. they observe, then deduce what the work says about the life around it ("one stool, one bowl, water hung from a tree so it stays cool: someone who makes ordinary life work simply, and enjoys it"). opinionated, unhurried, no superlatives. it's a file, [`curator.md`](./skills/curate/references/curator.md): swap in your own.
 
@@ -52,7 +52,7 @@ studio-visit/_curate_2026-10-08/
   _curate_2026-10-08_studio-visit.md     the curator's report: one file, everything in it
   _curate_2026-10-08_studio-visit.json   the same as data, for agents
   _curate_2026-10-08_studio-visit.pdf    the article: presentable, printable
-  contactsheet_2026-10-08/               the contact sheet (pdf, jpg pages, manifest)
+  contactsheet_2026-10-08/               the contact sheet (pdf, jpg pages, on white and black; manifest)
   selection_2026-10-08/                  an export, when you ask for one
   selection_2026-10-08-2/                another one
 ```

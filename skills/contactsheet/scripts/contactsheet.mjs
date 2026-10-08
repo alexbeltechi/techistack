@@ -16,8 +16,9 @@
  *
  * Options (sheet):
  *   --out <dir>       write somewhere else: outside the source folders, or a
- *                     /curate effort's `_curate_…` folder (a new dated
- *                     contactsheet_ folder is made inside it)
+ *                     /curate effort's `_curate_…` folder. A new dated
+ *                     contactsheet_ folder is made inside it, so a rerun
+ *                     never overwrites an earlier sheet
  *
  * By default each run writes a new folder `contactsheet_YYYY-MM-DD` (ISO 8601;
  * `-2`, `-3`… for more runs that day) inside the folder given, or inside the
@@ -37,7 +38,8 @@
  *
  * Each file is named after its sheet folder and what it shows, so it makes
  * sense on its own: contactsheet_2026-10-08-3_2025-Aug.pdf (all pages),
- * …_p01.jpg per page, and .json (frame number → source file).
+ * …_p01.jpg per page, the same on black as …_black.pdf and …_black_p01.jpg,
+ * and .json (frame number → source file).
  */
 
 import fs from "node:fs/promises";
@@ -131,6 +133,10 @@ function parseArgs(argv) {
     else if (a === "--raw") opts.raw = true;
     else opts.folders.push(path.resolve(a));
   }
+  const whole = (v) => Number.isInteger(v) && v > 0;
+  if (opts.max !== Infinity && !whole(opts.max)) throw new Error("--max is a number above 0, or all.");
+  if (opts.cols !== undefined && !whole(opts.cols)) throw new Error("--cols is a number above 0.");
+  if (opts.depth !== Infinity && !(Number.isInteger(opts.depth) && opts.depth >= 0)) throw new Error("--depth is 0 or more.");
   return opts;
 }
 
@@ -206,6 +212,14 @@ async function facts(file, readable) {
   return out;
 }
 
+/** Safe in a file name, still readable: "Ștefan & Ana — nuntă" → "Stefan-Ana-nunta". */
+const slug = (s) =>
+  s
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^\p{L}\p{N}.+_-]+/gu, "-")
+    .replace(/^[-.]+|-+$/g, "") || "sheet";
+
 /** A folder name that stands on its own: "Aug" alone says little, "2025-Aug" does. */
 function sourceLabel(folder) {
   const base = path.basename(folder);
@@ -227,8 +241,13 @@ async function toReadable(file, kind, tmp) {
 }
 
 /** "DSC_0001_final_4588.jpg" → "DSC_…4588.jpg". Keeps the last 4+ characters, which identify a frame. */
-/** Standard PDF fonts only cover Latin-1: strip diacritics, replace the rest. */
-const latin1 = (s) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^\x20-\x7e -ÿ…·–—]/g, "?");
+/** Standard PDF fonts cover WinAnsi: keep what they can draw (é, ü, “ ”), simplify the rest (ș → s), then "?". */
+const NOT_WINANSI = /[^\x20-\x7e -ÿ‘’“”–—…·•€]/g;
+const latin1 = (s) =>
+  String(s)
+    .normalize("NFC")
+    .replace(NOT_WINANSI, (ch) => ch.normalize("NFD").replace(/[̀-ͯ]/g, ""))
+    .replace(NOT_WINANSI, "?");
 
 const escapeXml = (s) => s.replace(/[<>&"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" })[c]);
 
@@ -283,6 +302,14 @@ const L = {
 const MADE_WITH = "Made with techistack";
 const REPO_URL = "https://github.com/alexbeltechi/techistack";
 const INK = { paper: [1, 1, 1], text: [0.1, 0.1, 0.1], dim: [0.45, 0.45, 0.45], edge: [0.82, 0.82, 0.82] };
+/** The same sheet on black: white text, nothing else changes. */
+const BLACK = { paper: [0, 0, 0], text: [1, 1, 1], dim: [0.6, 0.6, 0.6], edge: [0.25, 0.25, 0.25] };
+
+/** Pages laid out in INK, redrawn in another ink (same layout, same places). */
+const inInk = (pages, ink) => {
+  const swap = new Map(Object.keys(INK).map((k) => [INK[k], ink[k]]));
+  return pages.map((p) => ({ ...p, ink, ops: p.ops.map((op) => (op.fill ? { ...op, fill: swap.get(op.fill) ?? op.fill } : op)) }));
+};
 const css = ([r, g, b]) => `rgb(${Math.round(r * 255)},${Math.round(g * 255)},${Math.round(b * 255)})`;
 
 function pageFor(paper, cols) {
@@ -476,7 +503,7 @@ async function renderJpg(p, file) {
     }
   }
   // The paper's edge, so the page reads as a sheet on a white screen.
-  svg.push(`<rect x="0.5" y="0.5" width="${W - 1}" height="${H - 1}" fill="none" stroke="${css(INK.edge)}"/>`);
+  svg.push(`<rect x="0.5" y="0.5" width="${W - 1}" height="${H - 1}" fill="none" stroke="${css((p.ink || INK).edge)}"/>`);
   svg.push("</svg>");
   const layers = await Promise.all(
     images.map(async (op) => ({
@@ -492,13 +519,27 @@ async function renderJpg(p, file) {
     .toFile(file);
 }
 
+/** Promise.all over items.map(fn), with at most `limit` running at once. */
+async function mapLimit(items, limit, fn) {
+  const out = new Array(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++;
+      out[i] = await fn(items[i], i);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return out;
+}
+
 async function sheet(opts) {
   if (opts.folders.length === 0) throw new Error("Give at least one folder.");
   for (const f of opts.folders) if (!existsSync(f)) throw new Error(`Not found: ${f}`);
   if (!["pdf", "jpg", "both"].includes(opts.format)) throw new Error("--format is pdf, jpg or both.");
   if (!PAPER[opts.paper]) throw new Error("--paper is 3x4, a4 or letter.");
 
-  const subject = (opts.name || opts.folders.map(sourceLabel).join("+")).replace(/[^\w.+-]+/g, "-");
+  const subject = slug(opts.name || opts.folders.map(sourceLabel).join("+"));
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "contactsheet-"));
 
   const all = (await Promise.all(opts.folders.map((f) => walk(f, opts.depth)))).flat();
@@ -519,9 +560,9 @@ async function sheet(opts) {
       // A /curate effort folder is ours too: its sheet lives with its report.
       if (inside(out, f) && !CURATE_DIR.test(path.basename(out))) throw new Error(`--out ${out} is inside a source folder (${f}). Leave --out off to get a dated contactsheet folder there.`);
     }
-    // In a /curate effort, each sheet gets its own dated folder, so an effort can hold several.
-    if (CURATE_DIR.test(path.basename(out))) out = await newSheetDir(out);
-    else await fs.mkdir(out, { recursive: true });
+    // Always a fresh dated folder inside --out (a /curate effort can hold several), so a rerun never overwrites a sheet.
+    await fs.mkdir(out, { recursive: true });
+    out = await newSheetDir(out);
   } else {
     // Next to the photos: the deepest folder that holds all of them.
     out = await newSheetDir(commonParent([...new Set(pool.map((f) => path.dirname(f.path)))]));
@@ -530,34 +571,33 @@ async function sheet(opts) {
   const picked = Array.from({ length: n }, (_, i) => pool[Math.floor((i * pool.length) / n)]);
 
   const imagePx = 1400; // working size; each image is scaled to its frame below
-  const frames = await Promise.all(
-    picked.map(async (f, i) => {
-      const frame = {
-        n: i + 1,
-        path: f.path,
-        kind: f.kind,
-        folder: folderLabel(f.path, opts.folders),
-        stem: path.basename(f.path, path.extname(f.path)),
-        ext: path.extname(f.path).toLowerCase(),
-        image: null,
-      };
-      const src = await toReadable(f.path, f.kind, tmp);
-      if (!src) return frame;
-      Object.assign(frame, await facts(f.path, src));
-      try {
-        const { data, info } = await sharp(src)
-          .rotate()
-          .resize(imagePx, imagePx, { fit: "inside", withoutEnlargement: true })
-          .flatten({ background: "#ffffff" })
-          .jpeg({ quality: 90 })
-          .toBuffer({ resolveWithObject: true });
-        frame.image = { jpeg: data, w: info.width, h: info.height };
-      } catch {
-        // Unreadable file: the frame stays empty and is reported in the manifest.
-      }
-      return frame;
-    }),
-  );
+  // A few at a time: HEIC and raw each start a sips process.
+  const frames = await mapLimit(picked, Math.max(2, os.cpus().length), async (f, i) => {
+    const frame = {
+      n: i + 1,
+      path: f.path,
+      kind: f.kind,
+      folder: folderLabel(f.path, opts.folders),
+      stem: path.basename(f.path, path.extname(f.path)),
+      ext: path.extname(f.path).toLowerCase(),
+      image: null,
+    };
+    const src = await toReadable(f.path, f.kind, tmp);
+    if (!src) return frame;
+    Object.assign(frame, await facts(f.path, src));
+    try {
+      const { data, info } = await sharp(src)
+        .rotate()
+        .resize(imagePx, imagePx, { fit: "inside", withoutEnlargement: true })
+        .flatten({ background: "#ffffff" })
+        .jpeg({ quality: 90 })
+        .toBuffer({ resolveWithObject: true });
+      frame.image = { jpeg: data, w: info.width, h: info.height };
+    } catch {
+      // Unreadable file: the frame stays empty and is reported in the manifest.
+    }
+    return frame;
+  });
   // Only our own temp folder (HEIC/raw previews); nothing in the source is ever removed.
   await fs.rm(tmp, { recursive: true, force: true });
 
@@ -581,7 +621,9 @@ async function sheet(opts) {
   const measure = (text, size) => font.widthOfTextAtSize(latin1(text), size);
 
   const chunks = paginate(frames, page);
-  const sources = opts.folders.map((f) => path.basename(f)).join(", ");
+  // Where the work is, without the user's home path, cut in the middle when long.
+  const home = os.homedir();
+  const sources = opts.folders.map((f) => (inside(f, home) ? path.join("~", path.relative(home, f)) : f)).join(", ");
   const today = new Date().toISOString().slice(0, 10);
   const pages = chunks.map((chunk, i) =>
     layoutPage({
@@ -589,7 +631,7 @@ async function sheet(opts) {
       page,
       measure,
       pageNumber: i + 1,
-      footer: `${opts.folders.join(", ")}  ·  ${chunk[0].n}–${chunk[chunk.length - 1].n} of ${n}${n < pool.length ? ` (sampled from ${pool.length})` : ""}  ·  ${i + 1}/${chunks.length}  ·  ${today}`,
+      footer: `${fitMiddle(sources, page.contentW * 0.6, (t) => measure(t, L.text), 24)}  ·  ${chunk[0].n}–${chunk[chunk.length - 1].n} of ${n}${n < pool.length ? ` (sampled from ${pool.length})` : ""}  ·  ${i + 1}/${chunks.length}  ·  ${today}`,
     }),
   );
 
@@ -597,17 +639,20 @@ async function sheet(opts) {
   // what it is: contactsheet_2026-10-08-3_2025-Aug_p01.jpg
   const sheetDir = path.basename(out);
   const id = `${SHEET_DIR.test(sheetDir) ? sheetDir : `contactsheet_${today}`}_${subject}`;
+  // Every sheet twice: on white (to print and mark up) and on black (the same, white text).
   const written = [];
-  if (opts.format !== "jpg") {
-    const pdf = path.join(out, `${id}.pdf`);
-    await renderPdf(pages, pdf, id);
-    written.push(pdf);
-  }
-  if (opts.format !== "pdf") {
-    for (const [i, p] of pages.entries()) {
-      const jpg = path.join(out, `${id}_p${String(i + 1).padStart(2, "0")}.jpg`);
-      await renderJpg(p, jpg);
-      written.push(jpg);
+  for (const [suffix, sheetPages] of [["", pages], ["_black", inInk(pages, BLACK)]]) {
+    if (opts.format !== "jpg") {
+      const pdf = path.join(out, `${id}${suffix}.pdf`);
+      await renderPdf(sheetPages, pdf, `${id}${suffix}`);
+      written.push(pdf);
+    }
+    if (opts.format !== "pdf") {
+      for (const [i, p] of sheetPages.entries()) {
+        const jpg = path.join(out, `${id}${suffix}_p${String(i + 1).padStart(2, "0")}.jpg`);
+        await renderJpg(p, jpg);
+        written.push(jpg);
+      }
     }
   }
 
@@ -663,6 +708,7 @@ try {
     console.log(JSON.stringify(await sheet(parseArgs(rest)), null, 2));
   } else if (cmd === "pick") {
     const [manifestPath, ...numbers] = rest;
+    if (!manifestPath || numbers.length === 0) throw new Error("Usage: pick <manifest.json> <n>...");
     console.log(JSON.stringify(await pick(manifestPath, numbers.flatMap((s) => s.split(/[,\s]+/)).filter(Boolean)), null, 2));
   } else {
     console.error("Usage: contactsheet.mjs scan <folder>... | sheet <folder>... [--out dir] [--max n|all] [--format pdf|jpg|both] | pick <manifest.json> <n>...");

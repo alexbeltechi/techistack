@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.4.0 — 2026-10-08
+
+- **Black contact sheets.** Every sheet now also comes on black, with white
+  text: `<id>_black.pdf` and `<id>_black_p01.jpg…`, the same layout, numbers
+  and places as the white one. The article PDF stays on white.
+- `node test/smoke.mjs`: an end-to-end test of both skills on a generated
+  archive, run by CI on macOS and Linux (Node 20 and 24).
+
+Fixes from a wide test (formats, odd file names, broken files, 240 × 24 MP):
+
+- Contact sheets: `--out` now always makes a new dated `contactsheet_…` folder
+  inside the folder given. Before, a second run to the same `--out` folder
+  overwrote the first sheet.
+- Contact sheets: the footer shows the folder with your home as `~`, cut in
+  the middle when it's long, instead of the full path (which ran off the page
+  and showed your user name on shared sheets).
+- Sheets and the article keep curly quotes and accented letters the standard
+  PDF fonts can draw; file names keep them readable (`Stefan-Ana-nunta`, not
+  `-tefan-Ana-nunt-`).
+- At most a few images are converted at once, so a folder of HEICs no longer
+  starts one `sips` process per photo.
+- `--max`, `--cols`, `--depth`, `--size`, `--quality` and `--paper` are
+  checked up front, with a plain error.
+- `/curate select`: a broken or unreadable frame is listed as such instead of
+  stopping the export halfway; bad options no longer leave an empty
+  `selection_…` folder; a file name with spaces can be picked by name;
+  transparent images export on white.
+- Article PDF: a frame that can't be read is left out instead of failing the
+  whole PDF; a long observation no longer leaves a blank page before it; the
+  PDF's title and keywords keep any script.
+- The report's "Made with techistack" line stays at the end after exports.
+- sharp 0.35.5, which fixes a high-severity advisory in its bundled libvips,
+  libheif and librsvg.
+
 ## 0.3.0 — 2026-10-08
 
 - Every document techistack makes now carries a small "Made with techistack"

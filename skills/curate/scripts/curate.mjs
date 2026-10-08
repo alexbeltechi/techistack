@@ -28,6 +28,8 @@ import { renderArticle } from "./article.mjs";
 
 const run = promisify(execFile);
 const MARKER = "<!-- curate:report -->";
+const CREDIT = "Made with [techistack](https://github.com/alexbeltechi/techistack)";
+const CREDIT_BLOCK = `---\n\n<sub>${CREDIT}</sub>`;
 const CURATE_DIR = /^_curate_\d{4}-\d{2}-\d{2}(-\d+)?$/;
 const OURS = /^(_curate|contactsheet|selection)_\d{4}-\d{2}-\d{2}(-\d+)?$/;
 const PHOTO = /\.(jpe?g|png|webp|tiff?|avif|gif|heic|heif|nef|cr2|cr3|arw|dng|raf|orf|rw2)$/i;
@@ -51,7 +53,14 @@ const today = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 };
 const now = () => new Date().toISOString();
-const readJson = async (file) => JSON.parse(await fs.readFile(file, "utf8").catch(() => fail(`can't read ${file}`)));
+const readJson = async (file) => {
+  const text = await fs.readFile(file, "utf8").catch(() => fail(`can't read ${file}`));
+  try {
+    return JSON.parse(text);
+  } catch (err) {
+    fail(`${file} isn't valid JSON: ${err.message}`);
+  }
+};
 
 /** A fresh `<prefix>_YYYY-MM-DD` folder; never reuses one. */
 async function newDir(parent, prefix) {
@@ -76,6 +85,14 @@ async function photoDirs(dir, out = new Set()) {
   }
   return out;
 }
+
+/** Safe in a file name, still readable: "Ștefan & Ana — nuntă" → "Stefan-Ana-nunta". */
+const slug = (s) =>
+  s
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^\p{L}\p{N}.+_-]+/gu, "-")
+    .replace(/^[-.]+|-+$/g, "") || "work";
 
 /** "Aug" alone says little, "2025-Aug" does. */
 function sourceLabel(folder) {
@@ -125,6 +142,9 @@ function needFrames(effort) {
   if (!effort.data.frames.length) fail(`no contact sheet in ${effort.dir} yet: run contactsheet.mjs sheet <folder> --max all --out "${effort.dir}"`);
 }
 
+const isFrameFile = (effort, name) =>
+  effort.data.frames.some((f) => [path.basename(f.file), path.basename(f.file, path.extname(f.file))].some((x) => x.toLowerCase() === name.toLowerCase()));
+
 /** Frame numbers, or file names ("000058", "000058.JPG"), → sheet numbers. */
 function resolve(effort, list) {
   needFrames(effort);
@@ -149,7 +169,7 @@ async function open(args) {
   if (!dirs.length) fail(`no photos in ${folder}`);
   const source = commonParent(dirs);
   const nameAt = args.indexOf("--name");
-  const subject = ((nameAt > -1 && args[nameAt + 1]) || sourceLabel(folder)).replace(/[^\w.+-]+/g, "-");
+  const subject = slug((nameAt > -1 && args[nameAt + 1]) || sourceLabel(folder));
   const dir = await newDir(source, "_curate");
   const id = `${path.basename(dir)}_${subject}`;
   const data = {
@@ -205,8 +225,7 @@ async function write(args) {
   if (reportDraft) {
     const body = await fs.readFile(reportDraft, "utf8");
     if (!body.trimStart().startsWith(MARKER)) fail(`the report must start with ${MARKER}`);
-    const credit = "Made with [techistack](https://github.com/alexbeltechi/techistack)";
-    await fs.writeFile(effort.reportPath, body.includes(credit) ? body : `${body.trimEnd()}\n\n---\n\n<sub>${credit}</sub>\n`);
+    await fs.writeFile(effort.reportPath, body.includes(CREDIT) ? body : `${body.trimEnd()}\n\n${CREDIT_BLOCK}\n`);
     effort.data.history.push({ at: now(), event: "report written" });
   }
   await save(effort);
@@ -239,12 +258,15 @@ async function select(args) {
     else if (a === "--size") opts.size = Number(args[++i]);
     else if (a === "--quality") opts.quality = Number(args[++i]);
     else if (a === "--set") opts.set = args[++i];
-    else opts.picks.push(...a.split(/[,\s]+/).filter(Boolean));
+    // "7, 12 15" splits into numbers; a file name with spaces in it stays whole.
+    else opts.picks.push(...(isFrameFile(effort, a) ? [a] : a.split(/[,\s]+/).filter(Boolean)));
   }
   const preset = PRESETS[opts.preset] || fail(`--preset is one of ${Object.keys(PRESETS).join(", ")}`);
   const copy = opts.preset === "original";
   const size = opts.size ?? preset.size;
   const quality = opts.quality ?? preset.quality;
+  if (opts.size !== undefined && !(Number.isInteger(size) && size > 0)) fail("--size is a long edge in pixels, above 0");
+  if (opts.quality !== undefined && !(Number.isInteger(quality) && quality >= 1 && quality <= 100)) fail("--quality is 1 to 100");
 
   let numbers;
   if (opts.set) {
@@ -269,8 +291,12 @@ async function select(args) {
     if (copy) {
       // A byte-for-byte copy; the original is only read.
       const name = `${label}_${order}_${stem}${path.extname(frame.file)}`;
-      await fs.copyFile(src, path.join(out, name), fs.constants.COPYFILE_EXCL);
-      files.push({ order: i + 1, n, source: frame.file, file: name, bytes: (await fs.stat(path.join(out, name))).size });
+      try {
+        await fs.copyFile(src, path.join(out, name), fs.constants.COPYFILE_EXCL);
+        files.push({ order: i + 1, n, source: frame.file, file: name, bytes: (await fs.stat(path.join(out, name))).size });
+      } catch (err) {
+        files.push({ order: i + 1, n, source: frame.file, file: null, error: `can't copy: ${err.code || err.message}` });
+      }
       continue;
     }
     const name = `${label}_${order}_${stem}.jpg`;
@@ -279,14 +305,19 @@ async function select(args) {
       files.push({ order: i + 1, n, source: frame.file, file: null, error: "can't read this format here" });
       continue;
     }
-    // Orientation applied, colour in sRGB, metadata (incl. location) left behind.
-    let img = sharp(input).rotate();
-    if (size) img = img.resize(size, size, { fit: "inside", withoutEnlargement: true });
-    const info = await img
-      .toColorspace("srgb")
-      .jpeg({ quality, mozjpeg: true, chromaSubsampling: "4:4:4" })
-      .toFile(path.join(out, name));
-    files.push({ order: i + 1, n, source: frame.file, file: name, width: info.width, height: info.height, bytes: info.size });
+    try {
+      // Orientation applied, transparency on white, colour in sRGB, metadata (incl. location) left behind.
+      let img = sharp(input).rotate();
+      if (size) img = img.resize(size, size, { fit: "inside", withoutEnlargement: true });
+      const info = await img
+        .flatten({ background: "#ffffff" })
+        .toColorspace("srgb")
+        .jpeg({ quality, mozjpeg: true, chromaSubsampling: "4:4:4" })
+        .toFile(path.join(out, name));
+      files.push({ order: i + 1, n, source: frame.file, file: name, width: info.width, height: info.height, bytes: info.size });
+    } catch {
+      files.push({ order: i + 1, n, source: frame.file, file: null, error: "can't read this file (broken or unsupported)" });
+    }
   }
   // Only our own temp folder; nothing in the source is ever removed.
   await fs.rm(tmp, { recursive: true, force: true });
@@ -316,7 +347,11 @@ async function select(args) {
     ...files.map((f) => `${f.order}. \`${f.file ?? `(${f.error})`}\` ← frame ${f.n}, \`${f.source}\``),
     "",
   ];
-  await fs.appendFile(effort.reportPath, lines.join("\n")).catch(() => {});
+  // Above the credit line, so that stays last.
+  const report = await fs.readFile(effort.reportPath, "utf8").catch(() => "");
+  const at = report.lastIndexOf(CREDIT_BLOCK);
+  const body = at > -1 ? report.slice(0, at).trimEnd() : report.trimEnd();
+  await fs.writeFile(effort.reportPath, `${body}\n${lines.join("\n")}${at > -1 ? `\n${CREDIT_BLOCK}\n` : ""}`);
 
   const total = files.reduce((s, f) => s + (f.bytes || 0), 0);
   console.log(JSON.stringify({ folder: out, preset: opts.preset, files: files.map((f) => f.file || `(${f.error}) ${f.source}`), totalKB: Math.round(total / 1024) }, null, 2));
@@ -326,6 +361,7 @@ async function pdf(args) {
   const effort = await load(args[0] || fail("usage: pdf <_curate folder> [--paper a4|letter]"));
   const at = args.indexOf("--paper");
   const paper = at > -1 ? args[at + 1] : "a4";
+  if (!["a4", "letter"].includes(paper)) fail("--paper is a4 or letter");
   const file = path.join(effort.dir, `${effort.data.id}.pdf`);
   const result = await renderArticle(effort.data, file, { paper }).catch((err) => fail(err.message));
   effort.data.history.push({ at: now(), event: `article pdf written (${paper})` });

@@ -72,7 +72,7 @@ One footer line, centred under the images: source, frame range, page, date.
 
 The sheets land in a new `contactsheet_YYYY-MM-DD/` inside the folder that
 holds the photos (the deepest folder containing all of them, so a lab order
-folder inside `Aug/` gets it, not `Aug/`). `--out <dir>` sends them elsewhere,
+folder inside `Aug/` gets it, not `Aug/`). `--out <dir>` puts that dated folder elsewhere,
 e.g. the scratchpad for a quick look, but never inside a source folder.
 
 - Columns: 4, or 3 when most frames are landscape; `--cols` overrides.
@@ -94,14 +94,17 @@ its parent when the name is too short to stand alone (`Aug` → `2025-Aug`);
 - `<id>.pdf`: every page, with real (selectable) text. Best for marking up
   on a phone: Files › Markup, circle or cross out frames.
 - `<id>_p01.jpg…`: the same pages as images, for quick viewing.
+- `<id>_black.pdf`, `<id>_black_p01.jpg…`: the same sheet on black, with
+  white text. Same layout, same numbers and places; nicer on a screen.
 - `<id>.json`: the manifest (`frames[].n` → `path`).
 
-`--format pdf|jpg` for only one of them.
+`--format pdf|jpg` for only one of them (both colours either way).
 
 ## 3. Show
 
-Look at each JPG page yourself (Read the image), then send the PDF and the
-JPGs to the user (SendUserFile). Describe what you see in a few lines: the
+Look at each white JPG page yourself (Read the image; the black pages are the
+same), then send the PDFs and the JPGs, white and black, to the user
+(SendUserFile). Describe what you see in a few lines: the
 shoots inside, the strongest frames by number, near-duplicates, anything that
 looks mislabelled (another person's shoot in this folder). Don't comment on
 or flag what the images depict; what's fine to show is the user's call.

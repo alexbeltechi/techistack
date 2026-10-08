@@ -179,7 +179,9 @@ export async function renderArticle(data, file, { paper = "a4" } = {}) {
       if (!fr) continue;
       const src = await readable(path.join(data.source.folder, fr.file), tmp).catch(() => null);
       if (!src) continue;
-      const meta = await sharp(src).rotate().metadata();
+      // A frame that can't be read (broken, or raw off macOS) is left out, not the whole article.
+      const meta = await sharp(src).metadata().catch(() => null);
+      if (!meta?.width) continue;
       const swap = (meta.orientation || 1) >= 5;
       const w = swap ? meta.height : meta.width;
       const h = swap ? meta.width : meta.height;
@@ -194,7 +196,9 @@ export async function renderArticle(data, file, { paper = "a4" } = {}) {
     const captionHeight = caption ? wrap(caption, L.column, f.sans, 8.5).length * 12 + 6 : 0;
     const textHeight =
       (section.heading ? 22 : 0) + paras.reduce((sum, p) => sum + wrap(p, L.column, f.serif, 11.5).length * 17 + 9, 0) + 6;
-    if (y > L.top && room() < textHeight + (sectionRows[0]?.height ?? 0)) newPage();
+    // (Only when that fits on one page; a longer observation just flows on.)
+    const keep = textHeight + (sectionRows[0]?.height ?? 0);
+    if (y > L.top && room() < keep && keep <= H - 2 * L.top) newPage();
 
     if (section.heading) text(section.heading, { font: f.sansBold, size: 12, leading: 18, after: 4 });
     for (const para of paras) text(para, { font: f.serif, size: 11.5, leading: 17, after: 9 });
@@ -256,9 +260,10 @@ export async function renderArticle(data, file, { paper = "a4" } = {}) {
     p.node.addAnnot(doc.context.register(annot));
   });
 
-  doc.setTitle(winAnsi(article.title || data.id));
-  doc.setSubject(winAnsi(data.summary || ""));
-  doc.setKeywords([...new Set(data.frames.flatMap((fr) => fr.notes?.tags || []))].map(winAnsi));
+  // Document info takes any text (only the drawn text is limited to WinAnsi).
+  doc.setTitle(String(article.title || data.id));
+  doc.setSubject(String(data.summary || ""));
+  doc.setKeywords([...new Set(data.frames.flatMap((fr) => fr.notes?.tags || []))].map(String));
   await fs.writeFile(file, await doc.save());
   await fs.rm(tmp, { recursive: true, force: true });
   return { file, pages: pages.length, bytes: (await fs.stat(file)).size };

@@ -1,0 +1,10 @@
+name: An idea
+description: Something techistack could do, or do better
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: The idea
+      description: What you'd like, and the work it would help with.
+    validations:
+      required: true
