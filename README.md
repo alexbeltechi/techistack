@@ -39,8 +39,8 @@ each skill runs `npm install` once in its own folder (Node 20+; sharp, and pdf-l
 | [`/curate`](./skills/curate/SKILL.md) | you want a curator to go through a body of work. it opens a curation folder with a contact sheet, its report (first impression, the story as it reads it, what to show, in what order and for whom, a catalogue of every frame) and an article PDF, then exports the frames you choose, at the quality you choose, into a selection folder ready for anything. |
 
 ```
-/contactsheet ~/Pictures/2025/Colombia
-/curate ~/Pictures/2025/kitra
+/contactsheet ~/Pictures/2024/road-trip
+/curate ~/Pictures/2024/studio-visit
 ```
 
 ## how /curate works
@@ -48,13 +48,13 @@ each skill runs `npm install` once in its own folder (Node 20+; sharp, and pdf-l
 every run is a new curation, a folder next to your work:
 
 ```
-kitra/_curate_2026-10-08/
-  _curate_2026-10-08_kitra.md      the curator's report: one file, everything in it
-  _curate_2026-10-08_kitra.json    the same as data, for agents
-  _curate_2026-10-08_kitra.pdf     the article: presentable, printable
-  contactsheet_2026-10-08/         the contact sheet (pdf, jpg pages, manifest)
-  selection_2026-10-08/            an export, when you ask for one
-  selection_2026-10-08-2/          another one
+studio-visit/_curate_2026-10-08/
+  _curate_2026-10-08_studio-visit.md     the curator's report: one file, everything in it
+  _curate_2026-10-08_studio-visit.json   the same as data, for agents
+  _curate_2026-10-08_studio-visit.pdf    the article: presentable, printable
+  contactsheet_2026-10-08/               the contact sheet (pdf, jpg pages, manifest)
+  selection_2026-10-08/                  an export, when you ask for one
+  selection_2026-10-08-2/                another one
 ```
 
 1. **brief:** what's it for, and who's it for? given just a folder, it assumes your own site or portfolio and says so.
