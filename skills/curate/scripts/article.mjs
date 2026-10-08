@@ -69,26 +69,55 @@ const fitMiddle = (text, width, m, keep = 4) => {
   return m(`…${tail}`) <= width ? `…${tail}` : "";
 };
 
-/** Justified rows: every row fills the width; a very tall single image is capped and centred. */
+/**
+ * Justified rows, balanced: every row fills the width, and the images are
+ * spread so rows come out about the same height (4 images → 2 + 2, not 3 + 1),
+ * never a lone frame blown up to the full width.
+ */
 function rows(items, width) {
-  const out = [];
-  let row = [];
-  const fixed = (n) => n * (L.strip + L.stripGap) + (n - 1) * L.gap;
-  for (const it of items) {
-    row.push(it);
-    const ratio = row.reduce((s, r) => s + r.ratio, 0);
-    if (ratio * L.rowHeight + fixed(row.length) >= width) {
-      out.push({ items: row, height: (width - fixed(row.length)) / ratio });
-      row = [];
+  const n = items.length;
+  if (!n) return [];
+  const fixed = (count) => count * (L.strip + L.stripGap) + (count - 1) * L.gap;
+  const total = items.reduce((sum, it) => sum + it.ratio, 0);
+
+  // Split in order into k rows with about equal total ratio.
+  const split = (k) => {
+    const out = [];
+    let row = [];
+    let sum = 0;
+    let done = 0; // ratio in finished rows
+    for (let i = 0; i < n; i++) {
+      const left = n - i; // images not yet placed, including this one
+      const rowsLeft = k - out.length; // rows still to fill, including the current one
+      const target = (total * (out.length + 1)) / k;
+      const before = Math.abs(done + sum - target);
+      const after = Math.abs(done + sum + items[i].ratio - target);
+      // Close the row when adding this image moves us further from the target,
+      // as long as the remaining rows can still each get an image.
+      if (row.length && rowsLeft > 1 && after > before && left >= rowsLeft - 1) {
+        out.push(row);
+        done += sum;
+        row = [];
+        sum = 0;
+      }
+      row.push(items[i]);
+      sum += items[i].ratio;
     }
+    if (row.length) out.push(row);
+    return out;
+  };
+  const heightOf = (row) => (width - fixed(row.length)) / row.reduce((sum, it) => sum + it.ratio, 0);
+
+  let best = null;
+  for (let k = 1; k <= n; k++) {
+    const candidate = split(k);
+    const heights = candidate.map(heightOf);
+    const mean = heights.reduce((sum, h) => sum + h, 0) / heights.length;
+    const score = Math.abs(mean - L.rowHeight) + (Math.max(...heights) > L.maxImage ? 1000 : 0) + (candidate.some((r) => r.length === 1) && n > 1 ? 60 : 0);
+    if (!best || score < best.score) best = { score, rows: candidate };
   }
-  if (row.length) {
-    const ratio = row.reduce((s, r) => s + r.ratio, 0);
-    const full = (width - fixed(row.length)) / ratio;
-    // A short last row still fills the width; only its height is capped.
-    out.push({ items: row, height: Math.min(L.maxImage, full) });
-  }
-  return out;
+  // A very tall single image is capped and centred.
+  return best.rows.map((row) => ({ items: row, height: Math.min(L.maxImage, heightOf(row)) }));
 }
 
 async function readable(file, tmp) {

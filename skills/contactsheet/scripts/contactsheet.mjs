@@ -29,6 +29,8 @@
  *   --paper <p>       3x4 (default) | a4 | letter
  *   --cols <n>        columns (default 4, or 3 when most frames are landscape)
  *   --format <f>      pdf | jpg | both (default both)
+ *   --exclude <names> leave these files out, e.g. "000049,000050" (by name, with
+ *                     or without extension); listed in the manifest as excluded
  *   --raw             also preview raw files that have no export (macOS sips;
  *                     ignores Lightroom/XMP edits)
  *   --depth <n>       how deep to look (default: unlimited)
@@ -112,7 +114,7 @@ async function scan(folders, depth) {
 }
 
 function parseArgs(argv) {
-  const opts = { max: 20, paper: "3x4", format: "both", raw: false, depth: Infinity, folders: [] };
+  const opts = { max: 20, paper: "3x4", format: "both", raw: false, depth: Infinity, folders: [], exclude: [] };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const next = () => argv[++i];
@@ -125,6 +127,7 @@ function parseArgs(argv) {
     else if (a === "--cols") opts.cols = Number(next());
     else if (a === "--format") opts.format = next();
     else if (a === "--depth") opts.depth = Number(next());
+    else if (a === "--exclude") opts.exclude.push(...next().split(/[,\s]+/).filter(Boolean).map((x) => x.toLowerCase()));
     else if (a === "--raw") opts.raw = true;
     else opts.folders.push(path.resolve(a));
   }
@@ -486,7 +489,11 @@ async function sheet(opts) {
 
   const all = (await Promise.all(opts.folders.map((f) => walk(f, opts.depth)))).flat();
   const viewable = new Set(all.filter((f) => f.kind === "image" || f.kind === "heic").map((f) => stem(f.path)));
+  // Left out at the user's request: matched by file name, with or without extension.
+  const isExcluded = (f) => opts.exclude.includes(path.basename(f.path).toLowerCase()) || opts.exclude.includes(stem(f.path));
+  const excluded = all.filter((f) => (f.kind === "image" || f.kind === "heic" || f.kind === "raw") && isExcluded(f)).map((f) => path.basename(f.path));
   const pool = all
+    .filter((f) => !isExcluded(f))
     .filter((f) => f.kind === "image" || f.kind === "heic" || (opts.raw && f.kind === "raw" && !viewable.has(stem(f.path))))
     .sort((a, b) => a.path.localeCompare(b.path));
   if (pool.length === 0) throw new Error("No viewable images. Try `scan`, or --raw for raw-only folders.");
@@ -595,6 +602,7 @@ async function sheet(opts) {
     subject,
     created: new Date().toISOString(),
     folders: opts.folders,
+    excluded,
     total: pool.length,
     shown: n,
     files: written,

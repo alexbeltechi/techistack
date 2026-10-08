@@ -80,6 +80,9 @@ e.g. the scratchpad for a quick look, but never inside a source folder.
 - Overview: the default `--max 20` samples evenly across the set.
 - A whole shoot or roll: `--max all`; pages follow from how the frames fit.
 - `--depth 0` for one folder without its subfolders; `--name` to name it.
+- `--exclude 000049,000050` leaves frames out (by file name, with or without
+  extension): they aren't on the sheet or in the numbering, and the manifest
+  lists them under `excluded`. The originals are untouched.
 
 Output, about 350 KB per page each, in that folder:
 Every file is named after its sheet folder and what it shows, so each one

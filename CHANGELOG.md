@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- `/contactsheet --exclude`: leave named frames out of a sheet. They don't
+  appear in the numbering, and the manifest records them under `excluded`.
+  `/curate` uses it when you say "leave these images out".
+- Article PDF: image rows are balanced (4 images become 2 + 2, not 3 + 1) so no
+  frame is blown up to the full page width.
+
 ## 0.2.0 — 2026-10-08
 
 Beta. **Run it on a copy or a backup of a folder, not your only one.** It

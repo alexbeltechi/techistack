@@ -79,6 +79,11 @@ photos. Pointing the contact sheet at it makes a new `contactsheet_…` folder
 inside, so an effort can hold several looks; the effort picks up the newest.
 Look at every page, and every frame, before writing.
 
+If the user says to leave certain images out ("not 000049 and 000050"), pass
+them to the contact sheet with `--exclude 000049,000050`. Then they're nowhere
+in the effort: not on the sheet, in the numbering, the catalogue, a set or an
+export. Note it in the report's brief and closing line. Never delete them.
+
 ## 4. Report
 
 One markdown file holds everything. Write it and a plan in the scratchpad,
