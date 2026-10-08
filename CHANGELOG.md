@@ -1,5 +1,47 @@
 # Changelog
 
+## 0.5.0 — 2026-10-08
+
+- **`/scan`**, a third skill: a map of an archive, however large, in one
+  `_scan_YYYY-MM-DD` folder at its root (a `.md` to read, a `.json` for
+  agents). Per folder: files by kind (images, HEIC, raw, video, design files,
+  sidecars), size, file dates, exports, raw-only folders, catalogs, and the
+  `_curate_…` efforts and contact sheets already there. The map shows where
+  to look next and what's been curated. `status` checks it against the disk
+  using only folder listings and says what changed; `update` rereads only
+  changed folders and renames the folder to the new date; `note` keeps what a
+  folder is across rescans; `show` gives one folder in detail. Never opens a
+  photo. `/curate` and `/contactsheet` read it first when there is one.
+- **Contact sheet file names say their colour:** `contactsheetwhite_…` and
+  `contactsheetblack_…` (`.pdf`, `_p01.jpg…`). The folder and the manifest
+  keep `contactsheet_…`.
+- **Big folders can be reviewed instead of curated frame by frame.**
+  `curate.mjs measure` reports a folder's size (frames, shoots, pages) and
+  both ways in, writing nothing. The agent decides whether it can really
+  look at everything; there's no fixed limit. If not, `open --review` opens a
+  **review**. The review gets a scan snapshot inside its own folder and a
+  sampled sheet. The report covers the archive: folder by folder, what's
+  strong across it, what's done. It closes with three folders to curate next.
+  `curate.mjs next` opens them on "go".
+  New `references/review-template.md`.
+- **One footer line on every sheet and article:** where the work is on the
+  left, `/techistack` (a link to the repo) on the right, in the same size and
+  colour. The report and scan map end with the same `/techistack` link.
+- **Contact sheets read left to right:** justified rows, 1 2 3 4 then 5 6 7
+  8, like printed proofs, instead of columns read top to bottom.
+- `/contactsheet --sample`: a snapshot of a big archive. It takes frames
+  from every shoot, more from bigger ones (1 from a handful, up to about 5
+  from hundreds), from a shoot's picks when it has them. Evenly spaced
+  within each shoot, not random, so a sheet can be made again.
+- `/scan update --out <_curate folder>`: the scan as a snapshot inside a
+  review. `status` finds the newest scan, the archive's own or a review's.
+- `/contactsheet --list <file>`: a sheet of exactly the files listed, in
+  order. A review uses it to sample a few frames per shoot across an archive.
+- `/curate` no longer fails on an external drive's `._…` shadow files
+  (macOS AppleDouble) next to its own `.json`.
+- `/contactsheet` and `/curate` skip `_scan_…` folders.
+- Docs and code comments use mock names only.
+
 ## 0.4.0 — 2026-10-08
 
 - **Black contact sheets.** Every sheet now also comes on black, with white

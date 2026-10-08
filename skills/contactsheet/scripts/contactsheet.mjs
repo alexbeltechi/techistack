@@ -27,8 +27,16 @@
  *   --name <name>     what the sheet shows, in the filenames (default: the folder
  *                     name, with its parent when it's short, e.g. "2025-Aug")
  *   --max <n|all>     frames to show (default 20, evenly spaced across the set)
+ *   --sample          a snapshot of a big archive: frames from every shoot,
+ *                     more from bigger ones (1 from a handful, ~5 from
+ *                     hundreds), from its exports when it has them; --max caps
+ *                     the total
+ *   --list <file>     a sheet of exactly these files (one path per line, in
+ *                     order), e.g. a sample an agent chose across an archive
+ *                     or the picks of several curations; no folder needed
  *   --paper <p>       3x4 (default) | a4 | letter
- *   --cols <n>        columns (default 4, or 3 when most frames are landscape)
+ *   --cols <n>        about how many portrait frames fit a row (default 4); rows
+ *                     read left to right, each scaled to fill the width
  *   --format <f>      pdf | jpg | both (default both)
  *   --exclude <names> leave these files out, e.g. "000049,000050" (by name, with
  *                     or without extension); listed in the manifest as excluded
@@ -36,10 +44,10 @@
  *                     ignores Lightroom/XMP edits)
  *   --depth <n>       how deep to look (default: unlimited)
  *
- * Each file is named after its sheet folder and what it shows, so it makes
- * sense on its own: contactsheet_2026-10-08-3_2025-Aug.pdf (all pages),
- * …_p01.jpg per page, the same on black as …_black.pdf and …_black_p01.jpg,
- * and .json (frame number → source file).
+ * Each file is named after its sheet folder, its colour and what it shows, so
+ * it makes sense on its own: contactsheetwhite_2026-10-08-3_2025-Aug.pdf (all
+ * pages) and …_p01.jpg per page, the same on black as contactsheetblack_…,
+ * and contactsheet_2026-10-08-3_2025-Aug.json (frame number → source file).
  */
 
 import fs from "node:fs/promises";
@@ -76,7 +84,7 @@ async function walk(dir, depth, out = []) {
     return out;
   }
   for (const e of entries) {
-    if (e.name.startsWith(".") || SHEET_DIR.test(e.name) || CURATE_DIR.test(e.name)) continue;
+    if (e.name.startsWith(".") || SHEET_DIR.test(e.name) || CURATE_DIR.test(e.name) || SCAN_DIR.test(e.name)) continue;
     const full = path.join(dir, e.name);
     if (e.isDirectory()) await walk(full, depth - 1, out);
     else if (e.isFile()) {
@@ -116,7 +124,7 @@ async function scan(folders, depth) {
 }
 
 function parseArgs(argv) {
-  const opts = { max: 20, paper: "3x4", format: "both", raw: false, depth: Infinity, folders: [], exclude: [] };
+  const opts = { max: null, paper: "3x4", format: "both", raw: false, depth: Infinity, folders: [], exclude: [] };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const next = () => argv[++i];
@@ -131,10 +139,13 @@ function parseArgs(argv) {
     else if (a === "--depth") opts.depth = Number(next());
     else if (a === "--exclude") opts.exclude.push(...next().split(/[,\s]+/).filter(Boolean).map((x) => x.toLowerCase()));
     else if (a === "--raw") opts.raw = true;
+    else if (a === "--sample") opts.sample = true;
+    else if (a === "--list") opts.list = path.resolve(next());
     else opts.folders.push(path.resolve(a));
   }
   const whole = (v) => Number.isInteger(v) && v > 0;
-  if (opts.max !== Infinity && !whole(opts.max)) throw new Error("--max is a number above 0, or all.");
+  if (opts.max !== null && opts.max !== Infinity && !whole(opts.max)) throw new Error("--max is a number above 0, or all.");
+  opts.max ??= opts.sample || opts.list ? Infinity : 20;
   if (opts.cols !== undefined && !whole(opts.cols)) throw new Error("--cols is a number above 0.");
   if (opts.depth !== Infinity && !(Number.isInteger(opts.depth) && opts.depth >= 0)) throw new Error("--depth is 0 or more.");
   return opts;
@@ -149,6 +160,8 @@ const inside = (child, parent) => {
 const SHEET_DIR = /^contactsheet_\d{4}-\d{2}-\d{2}(-\d+)?$/;
 /** /curate's folders hold prepared copies; never show them as originals. */
 const CURATE_DIR = /^_curate_\d{4}-\d{2}-\d{2}(-\d+)?$/;
+/** /scan's index of the archive. */
+const SCAN_DIR = /^_scan_\d{4}-\d{2}-\d{2}(-\d+)?$/;
 
 function commonParent(folders) {
   let base = folders[0];
@@ -251,18 +264,30 @@ const latin1 = (s) =>
 
 const escapeXml = (s) => s.replace(/[<>&"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" })[c]);
 
-/** Folders that only describe a step (an export, a lab roll), not the shoot. */
-const GENERIC = /^(_?exports?(_\w+)?|selection|select|final|edits?|digi(tal)?|_?film|scans?|jpe?g|\d+(-\w+)?)$/i;
+/** Folders that only describe a step (an export, a lab roll, a camera), not the shoot. */
+const GENERIC = /^(_?exports?(_?\s?\w+)?|selections?|select|final(_?\w+)?|(further_)?edits?|_?(my )?picks|sel\s?\d*|batch \d+|untitled export|digi(tal)?( \d+)?|_?film|scans?|jpe?g|_?psd|_?raws?|iphone|bts|\d+(-\w+)?|\d{3}[A-Z0-9_]{4,5})$/i;
 
-/** The shoot a frame belongs to: its folder, skipping generic ones like `_export` or `004585`. */
-function folderLabel(file, roots) {
+/** A folder named for a day or a month: 2024-09-16_Portraits, 2017_07-19_Studio, 03-17-2026-Hike, Feb 2026 Retreat. */
+const DATED = /^(\d{4}[-_]\d{2}[-_]\d{2}|\d{2}[-_]\d{2}[-_]\d{4}|(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]* \d{4})/i;
+
+/**
+ * The shoot a frame belongs to. In an archive that names shoots by date, the
+ * first dated folder below the root, whatever's inside it (`Digital/r1/black`,
+ * `Photos/2026/2026-03-01`). Otherwise the frame's folder, skipping step
+ * folders like `_export`, `Digital`, `004585` or a camera's `100NCD90`.
+ */
+function shootOf(file, roots) {
   const root = roots.find((r) => inside(file, r)) || path.dirname(file);
+  const parts = path.relative(root, path.dirname(file)).split(path.sep).filter(Boolean);
+  const dated = parts.findIndex((p) => DATED.test(p));
+  if (dated > -1) return path.join(root, ...parts.slice(0, dated + 1));
   let dir = path.dirname(file);
   while (dir !== root && GENERIC.test(path.basename(dir))) dir = path.dirname(dir);
-  return path.basename(dir);
+  return dir;
 }
+const folderLabel = (file, roots) => path.basename(shootOf(file, roots));
 
-/** Cut the end: "Cristina Sh…". */
+/** Cut the end: "Studio Vis…". */
 function fitEnd(text, width, measure) {
   if (measure(text) <= width) return text;
   for (let n = text.length - 1; n > 0; n--) {
@@ -272,7 +297,7 @@ function fitEnd(text, width, measure) {
   return "";
 }
 
-/** Cut the middle, keeping at least the last 4 characters, which identify a frame: "DSCN…1647". */
+/** Cut the middle, keeping at least the last 4 characters, which identify a frame: "IMG_…4821". */
 function fitMiddle(text, width, measure, keep = 4) {
   if (measure(text) <= width) return text;
   const tail = text.slice(-keep);
@@ -289,17 +314,17 @@ const PAPER = { "3x4": [600, 800], a4: [595.28, 841.89], letter: [612, 792] };
 const L = {
   side: 24, // left and right page margin
   top: 48, // top and bottom page margin
-  colGap: 12, // between columns
-  rowGap: 10, // between images in a column
+  colGap: 12, // between frames in a row
+  rowGap: 10, // between rows
   strip: 8, // edge text column, left of each image
   stripGap: 3,
   text: 6.5, // edge text size: folder, number and filename alike
   gutter: 4, // between the three pieces of edge text
   footerGap: 14, // between the images and the footer line
-  tallest: 1.6, // an image is at most this many times as tall as the column is wide
   scale: 3,
 };
-const MADE_WITH = "Made with techistack";
+/** The brand, at the right end of the footer line, as the user would type it. */
+const BRAND = "/techistack";
 const REPO_URL = "https://github.com/alexbeltechi/techistack";
 const INK = { paper: [1, 1, 1], text: [0.1, 0.1, 0.1], dim: [0.45, 0.45, 0.45], edge: [0.82, 0.82, 0.82] };
 /** The same sheet on black: white text, nothing else changes. */
@@ -321,66 +346,61 @@ function pageFor(paper, cols) {
   return { width, height, cols, contentW, contentH, colW, imgW };
 }
 
-/** An image's size in its column: full column width, natural height, very tall ones capped and narrowed. */
-function frameSize(f, imgW) {
-  if (!f.image) return { w: imgW, h: imgW };
-  let w = imgW;
-  let h = (imgW * f.image.h) / f.image.w;
-  if (h > imgW * L.tallest) {
-    h = imgW * L.tallest;
-    w = (h * f.image.w) / f.image.h;
+/** Width over height, kept sane: a missing frame is square, panoramas and slivers are capped. */
+const aspect = (f) => (f.image ? Math.min(4, Math.max(0.4, f.image.w / f.image.h)) : 1);
+
+/**
+ * Frames in reading order, left to right, in justified rows like printed
+ * proofs: each row scaled to fill the width, near the target height. A short
+ * last row keeps the target height instead of being blown up.
+ */
+function rowsOf(frames, page) {
+  const target = page.imgW * 1.25;
+  const fixed = (k) => k * (L.strip + L.stripGap) + (k - 1) * L.colGap;
+  const fit = (row) => (page.contentW - fixed(row.length)) / row.reduce((s, f) => s + aspect(f), 0);
+  const rows = [];
+  let row = [];
+  for (const f of frames) {
+    const next = [...row, f];
+    if (row.length && fit(next) < target) {
+      // Close the row with or without this frame, whichever lands nearer the target height.
+      if (Math.abs(fit(next) - target) < Math.abs(fit(row) - target)) {
+        rows.push(next);
+        row = [];
+        continue;
+      }
+      rows.push(row);
+      row = [f];
+    } else row = next;
   }
-  return { w, h };
+  if (row.length) rows.push(row);
+  return rows.map((r, i) => {
+    const last = i === rows.length - 1;
+    const h = Math.min(page.contentH, last ? Math.min(target, fit(r)) : fit(r));
+    for (const f of r) f.size = { w: aspect(f) * h, h };
+    return { frames: r, h };
+  });
 }
 
-/** Pack frames, in order, down the columns of as many pages as needed. */
-function paginate(frames, page) {
+/** Rows onto pages, as many as fit each page. */
+function paginate(rows, page) {
   const pages = [];
-  let current = [], col = 0, used = 0;
-  for (const f of frames) {
-    const need = (used ? L.rowGap : 0) + f.size.h;
-    if (used && used + need > page.contentH) {
-      col++;
+  let current = [], used = 0;
+  for (const r of rows) {
+    const need = (used ? L.rowGap : 0) + r.h;
+    if (current.length && used + need > page.contentH) {
+      pages.push(current);
+      current = [];
       used = 0;
-      if (col === page.cols) {
-        pages.push(current);
-        current = [];
-        col = 0;
-      }
     }
-    current.push(f);
-    used += (used ? L.rowGap : 0) + f.size.h;
+    used += (used ? L.rowGap : 0) + r.h;
+    current.push(r);
   }
   if (current.length) pages.push(current);
   return pages;
 }
 
-/** Split one page's frames into contiguous columns with the shortest tallest column. */
-function balance(frames, page) {
-  const split = (limit) => {
-    const cols = [[]];
-    let used = 0;
-    for (const f of frames) {
-      const need = (used ? L.rowGap : 0) + f.size.h;
-      if (used && used + need > limit) {
-        cols.push([]);
-        used = 0;
-      }
-      cols[cols.length - 1].push(f);
-      used += (used ? L.rowGap : 0) + f.size.h;
-    }
-    return cols;
-  };
-  let lo = Math.max(...frames.map((f) => f.size.h)), hi = page.contentH;
-  for (let i = 0; i < 40; i++) {
-    const mid = (lo + hi) / 2;
-    if (split(mid).length <= page.cols) hi = mid;
-    else lo = mid;
-  }
-  return split(hi);
-}
-
-const columnHeight = (col) => col.reduce((sum, f, i) => sum + f.size.h + (i ? L.rowGap : 0), 0);
+const rowsHeight = (rows) => rows.reduce((sum, r, i) => sum + r.h + (i ? L.rowGap : 0), 0);
 
 /** Edge text, climbing the image's left side: folder (fill) · number (hug) · filename.ext (fill). */
 function edgeText(ops, f, baseX, bottom, h, measure) {
@@ -417,35 +437,34 @@ function edgeText(ops, f, baseX, bottom, h, measure) {
 
 /**
  * One page as drawing instructions, top-left origin. Both renderers read this,
- * so the PDF and the JPG always match. Columns are centred as a group, each
- * column is centred vertically, and the footer sits centred under the tallest.
+ * so the PDF and the JPG always match. Rows read left to right, each centred,
+ * the block centred on the page. Under it one footer line: where the work is
+ * on the left, /techistack (a link to the repo) on the right, alike in size
+ * and colour.
  */
-function layoutPage({ columns, page, footer, measure, pageNumber }) {
-  const { width, height, contentW, contentH, colW } = page;
+function layoutPage({ rows, page, footer, measure, pageNumber }) {
+  const { width, height, contentW, contentH } = page;
   const ops = [{ t: "rect", x: 0, y: 0, w: width, h: height, fill: INK.paper }];
-  const blockW = columns.length * colW + (columns.length - 1) * L.colGap;
-  const x0 = L.side + (contentW - blockW) / 2;
-  const tallest = Math.max(...columns.map(columnHeight));
-
-  columns.forEach((col, c) => {
-    const colX = x0 + c * (colW + L.colGap);
-    let y = L.top + (contentH - columnHeight(col)) / 2;
-    for (const f of col) {
+  const blockH = rowsHeight(rows);
+  let y = L.top + (contentH - blockH) / 2;
+  for (const r of rows) {
+    const rowW = r.frames.reduce((sum, f, i) => sum + L.strip + L.stripGap + f.size.w + (i ? L.colGap : 0), 0);
+    let gx = L.side + (contentW - rowW) / 2;
+    for (const f of r.frames) {
       const { w, h } = f.size;
-      const groupW = L.strip + L.stripGap + w;
-      const gx = colX + (colW - groupW) / 2;
       const ix = gx + L.strip + L.stripGap;
       if (f.image) ops.push({ t: "image", x: ix, y, w, h, image: f.image });
       f.place = { page: pageNumber, x: ix, y, w, h };
       edgeText(ops, f, gx + L.strip - 1, y + h, h, measure);
-      y += h + L.rowGap;
+      gx = ix + w + L.colGap;
     }
-  });
+    y += r.h + L.rowGap;
+  }
 
-  const footerY = L.top + (contentH - tallest) / 2 + tallest + L.footerGap + L.text;
-  ops.push({ t: "text", x: (width - measure(footer, L.text)) / 2, y: footerY, size: L.text, text: footer, fill: INK.text });
-  const mark = L.text - 1;
-  ops.push({ t: "text", x: (width - measure(MADE_WITH, mark)) / 2, y: height - L.top / 2, size: mark, text: MADE_WITH, fill: INK.dim, link: REPO_URL, w: measure(MADE_WITH, mark) });
+  const footerY = L.top + (contentH - blockH) / 2 + blockH + L.footerGap + L.text;
+  const brandW = measure(BRAND, L.text);
+  ops.push({ t: "text", x: L.side, y: footerY, size: L.text, text: footer(contentW - brandW - L.colGap), fill: INK.text });
+  ops.push({ t: "text", x: width - L.side - brandW, y: footerY, size: L.text, text: BRAND, fill: INK.text, link: REPO_URL, w: brandW });
   return { width, height, ops };
 }
 
@@ -533,25 +552,74 @@ async function mapLimit(items, limit, fn) {
   return out;
 }
 
+/** n items evenly spaced across a list, in order. */
+const spread = (list, n) => Array.from({ length: n }, (_, i) => list[Math.floor((i * list.length) / n)]);
+
+/** Folders below a shoot that hold its picks. */
+const PICKS = /(^|[_\s-])(export|exports|selection|select|final|edit|edits|picks)/i;
+
+/** How many frames a shoot of n gets: 1 for a handful, 2 around ten, 3 for dozens, 4–5 for hundreds. */
+const share = (n) => Math.min(5, Math.max(1, Math.round(2 * Math.log10(n))));
+
+/**
+ * A snapshot of an archive: frames from every shoot, more from bigger ones,
+ * evenly spaced within it, `max` in all. A shoot's pool is its picks (export,
+ * selection, edits, picks folders) when it has any; otherwise its images,
+ * leaving out camera JPEGs that sit next to their raws.
+ */
+function sampleShoots(pool, all, roots, max) {
+  const rawNext = new Set(all.filter((f) => f.kind === "raw").map((f) => path.join(path.dirname(f.path), stem(f.path))));
+  const shoots = new Map();
+  for (const f of pool) {
+    const s = shootOf(f.path, roots);
+    if (!shoots.has(s)) shoots.set(s, []);
+    shoots.get(s).push(f);
+  }
+  let groups = [...shoots.entries()].map(([dir, files]) => {
+    const picks = files.filter((f) => path.relative(dir, path.dirname(f.path)).split(path.sep).some((d) => PICKS.test(d)));
+    const plain = files.filter((f) => !rawNext.has(path.join(path.dirname(f.path), stem(f.path))));
+    const use = picks.length ? picks : plain.length ? plain : files;
+    return { dir, files: use, k: share(use.length) };
+  });
+  if (groups.length > max) groups = spread(groups, max).map((g) => ({ ...g, k: 1 }));
+  const total = groups.reduce((s, g) => s + g.k, 0);
+  if (total > max) {
+    // Over --max: everyone gives up frames in proportion, never below one.
+    const ratio = (max - groups.length) / (total - groups.length);
+    for (const g of groups) g.k = 1 + Math.floor((g.k - 1) * ratio);
+  }
+  const picked = groups.flatMap((g) => spread(g.files, Math.min(g.k, g.files.length)));
+  return { picked, shoots: groups.length, of: shoots.size };
+}
+
 async function sheet(opts) {
+  let listed = null;
+  if (opts.list) {
+    // Exactly these files, in this order; the folders are where they live.
+    const lines = (await fs.readFile(opts.list, "utf8")).split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    listed = lines.map((l) => path.resolve(path.dirname(opts.list), l)).filter((f) => existsSync(f) && kindOf(f));
+    if (!listed.length) throw new Error(`No readable photos listed in ${opts.list}.`);
+    if (!opts.folders.length) opts.folders = [commonParent([...new Set(listed.map((f) => path.dirname(f)))])];
+  }
   if (opts.folders.length === 0) throw new Error("Give at least one folder.");
   for (const f of opts.folders) if (!existsSync(f)) throw new Error(`Not found: ${f}`);
   if (!["pdf", "jpg", "both"].includes(opts.format)) throw new Error("--format is pdf, jpg or both.");
   if (!PAPER[opts.paper]) throw new Error("--paper is 3x4, a4 or letter.");
 
   const subject = slug(opts.name || opts.folders.map(sourceLabel).join("+"));
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "contactsheet-"));
 
-  const all = (await Promise.all(opts.folders.map((f) => walk(f, opts.depth)))).flat();
+  const all = listed ? listed.map((f) => ({ path: f, kind: kindOf(f) })) : (await Promise.all(opts.folders.map((f) => walk(f, opts.depth)))).flat();
   const viewable = new Set(all.filter((f) => f.kind === "image" || f.kind === "heic").map((f) => stem(f.path)));
   // Left out at the user's request: matched by file name, with or without extension.
   const isExcluded = (f) => opts.exclude.includes(path.basename(f.path).toLowerCase()) || opts.exclude.includes(stem(f.path));
   const excluded = all.filter((f) => (f.kind === "image" || f.kind === "heic" || f.kind === "raw") && isExcluded(f)).map((f) => path.basename(f.path));
   const pool = all
     .filter((f) => !isExcluded(f))
-    .filter((f) => f.kind === "image" || f.kind === "heic" || (opts.raw && f.kind === "raw" && !viewable.has(stem(f.path))))
-    .sort((a, b) => a.path.localeCompare(b.path));
+    .filter((f) => f.kind === "image" || f.kind === "heic" || (opts.raw && f.kind === "raw" && !viewable.has(stem(f.path))));
+  // A list keeps the order it was given in; folders are read in path order.
+  if (!listed) pool.sort((a, b) => a.path.localeCompare(b.path));
   if (pool.length === 0) throw new Error("No viewable images. Try `scan`, or --raw for raw-only folders.");
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "contactsheet-"));
 
   let out;
   if (opts.out) {
@@ -567,8 +635,9 @@ async function sheet(opts) {
     // Next to the photos: the deepest folder that holds all of them.
     out = await newSheetDir(commonParent([...new Set(pool.map((f) => path.dirname(f.path)))]));
   }
-  const n = Math.min(opts.max, pool.length);
-  const picked = Array.from({ length: n }, (_, i) => pool[Math.floor((i * pool.length) / n)]);
+  const sampled = opts.sample ? sampleShoots(pool, all, opts.folders, opts.max) : null;
+  const picked = sampled ? sampled.picked : spread(pool, Math.min(opts.max, pool.length));
+  const n = picked.length;
 
   const imagePx = 1400; // working size; each image is scaled to its frame below
   // A few at a time: HEIC and raw each start a sips process.
@@ -602,9 +671,8 @@ async function sheet(opts) {
   await fs.rm(tmp, { recursive: true, force: true });
 
   const loaded = frames.filter((f) => f.image);
-  const landscape = loaded.filter((f) => f.image.w > f.image.h * 1.02).length > loaded.length / 2;
-  const page = pageFor(opts.paper, opts.cols || (landscape ? 3 : 4));
-  for (const f of frames) f.size = frameSize(f, page.imgW);
+  const page = pageFor(opts.paper, opts.cols || 4);
+  const rows = rowsOf(frames, page);
   // Each image at its frame size × SCALE: sharp on retina and phones, still small.
   await Promise.all(
     loaded.map(async (f) => {
@@ -620,36 +688,41 @@ async function sheet(opts) {
   const font = await metrics.embedFont(StandardFonts.Helvetica);
   const measure = (text, size) => font.widthOfTextAtSize(latin1(text), size);
 
-  const chunks = paginate(frames, page);
+  const chunks = paginate(rows, page).map((pageRows) => ({ rows: pageRows, first: pageRows[0].frames[0].n, last: pageRows.at(-1).frames.at(-1).n }));
   // Where the work is, without the user's home path, cut in the middle when long.
   const home = os.homedir();
   const sources = opts.folders.map((f) => (inside(f, home) ? path.join("~", path.relative(home, f)) : f)).join(", ");
   const today = new Date().toISOString().slice(0, 10);
   const pages = chunks.map((chunk, i) =>
     layoutPage({
-      columns: balance(chunk, page),
+      rows: chunk.rows,
       page,
       measure,
       pageNumber: i + 1,
-      footer: `${fitMiddle(sources, page.contentW * 0.6, (t) => measure(t, L.text), 24)}  ·  ${chunk[0].n}–${chunk[chunk.length - 1].n} of ${n}${n < pool.length ? ` (sampled from ${pool.length})` : ""}  ·  ${i + 1}/${chunks.length}  ·  ${today}`,
+      // The location is cut in the middle to whatever room the rest of the line leaves.
+      footer: (room) => {
+        const rest = `  ·  ${chunk.first}–${chunk.last} of ${n}${n < pool.length ? ` (sampled from ${pool.length})` : ""}  ·  ${i + 1}/${chunks.length}  ·  ${today}`;
+        return fitMiddle(sources, room - measure(rest, L.text), (t) => measure(t, L.text), 24) + rest;
+      },
     }),
   );
 
-  // Every file carries the sheet's full id, so one emailed on its own still says
-  // what it is: contactsheet_2026-10-08-3_2025-Aug_p01.jpg
+  // Every file carries the sheet's full id and its colour, so one emailed on its
+  // own still says what it is: contactsheetwhite_2026-10-08-3_2025-Aug_p01.jpg
   const sheetDir = path.basename(out);
   const id = `${SHEET_DIR.test(sheetDir) ? sheetDir : `contactsheet_${today}`}_${subject}`;
   // Every sheet twice: on white (to print and mark up) and on black (the same, white text).
   const written = [];
-  for (const [suffix, sheetPages] of [["", pages], ["_black", inInk(pages, BLACK)]]) {
+  for (const [ink, sheetPages] of [["white", pages], ["black", inInk(pages, BLACK)]]) {
+    const name = id.replace(/^contactsheet/, `contactsheet${ink}`);
     if (opts.format !== "jpg") {
-      const pdf = path.join(out, `${id}${suffix}.pdf`);
-      await renderPdf(sheetPages, pdf, `${id}${suffix}`);
+      const pdf = path.join(out, `${name}.pdf`);
+      await renderPdf(sheetPages, pdf, name);
       written.push(pdf);
     }
     if (opts.format !== "pdf") {
       for (const [i, p] of sheetPages.entries()) {
-        const jpg = path.join(out, `${id}${suffix}_p${String(i + 1).padStart(2, "0")}.jpg`);
+        const jpg = path.join(out, `${name}_p${String(i + 1).padStart(2, "0")}.jpg`);
         await renderJpg(p, jpg);
         written.push(jpg);
       }
@@ -664,6 +737,7 @@ async function sheet(opts) {
     excluded,
     total: pool.length,
     shown: n,
+    ...(sampled ? { sampling: { by: "shoot", ...(opts.max !== Infinity ? { max: opts.max } : {}), shoots: sampled.shoots, of: sampled.of } } : {}),
     files: written,
     units: "points, top-left origin; multiply by scale for JPG pixels",
     scale: L.scale,
@@ -711,7 +785,7 @@ try {
     if (!manifestPath || numbers.length === 0) throw new Error("Usage: pick <manifest.json> <n>...");
     console.log(JSON.stringify(await pick(manifestPath, numbers.flatMap((s) => s.split(/[,\s]+/)).filter(Boolean)), null, 2));
   } else {
-    console.error("Usage: contactsheet.mjs scan <folder>... | sheet <folder>... [--out dir] [--max n|all] [--format pdf|jpg|both] | pick <manifest.json> <n>...");
+    console.error("Usage: contactsheet.mjs scan <folder>... | sheet <folder>... [--out dir] [--max n|all] [--sample] [--format pdf|jpg|both] | pick <manifest.json> <n>...");
     process.exit(1);
   }
 } catch (err) {

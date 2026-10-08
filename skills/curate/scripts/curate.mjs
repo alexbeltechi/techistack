@@ -7,8 +7,16 @@
  * `selection_YYYY-MM-DD[-n]` folder inside. Any later session or agent can pick
  * the effort up from the .json.
  *
- *   node curate.mjs open <folder> [--name <subject>]
+ *   node curate.mjs measure <folder>
+ *     how big it is (frames, shoots, pages) and both ways in; writes nothing.
+ *     Whoever curates decides whether they can really look at all of it.
+ *   node curate.mjs open <folder> [--name <subject>] [--review]
  *     → then: contactsheet.mjs sheet <folder> --max all --out <_curate folder>
+ *     --review when it's more than can be looked at frame by frame: a scan
+ *     snapshot and a sampled sheet inside the effort, a report on the
+ *     archive, and which folders to curate next.
+ *   node curate.mjs next <review _curate folder> [<folder>...]
+ *     "go": opens an effort for each folder the review proposed (or those given)
  *   node curate.mjs write <_curate folder> --report <draft.md> [--plan <plan.json>]
  *   node curate.mjs select <_curate folder> (<n|file>... | --set <key> [<n>...]) [--preset original|large|web|small]
  *   node curate.mjs pdf <_curate folder> [--paper a4|letter]
@@ -19,6 +27,7 @@
  */
 
 import fs from "node:fs/promises";
+import { existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execFile } from "node:child_process";
@@ -28,11 +37,15 @@ import { renderArticle } from "./article.mjs";
 
 const run = promisify(execFile);
 const MARKER = "<!-- curate:report -->";
-const CREDIT = "Made with [techistack](https://github.com/alexbeltechi/techistack)";
+const CREDIT = "[/techistack](https://github.com/alexbeltechi/techistack)";
 const CREDIT_BLOCK = `---\n\n<sub>${CREDIT}</sub>`;
 const CURATE_DIR = /^_curate_\d{4}-\d{2}-\d{2}(-\d+)?$/;
-const OURS = /^(_curate|contactsheet|selection)_\d{4}-\d{2}-\d{2}(-\d+)?$/;
+const OURS = /^(_curate|_scan|contactsheet|selection)_\d{4}-\d{2}-\d{2}(-\d+)?$/;
 const PHOTO = /\.(jpe?g|png|webp|tiff?|avif|gif|heic|heif|nef|cr2|cr3|arw|dng|raf|orf|rw2)$/i;
+const VIEWABLE = /\.(jpe?g|png|webp|tiff?|avif|gif|heic|heif)$/i;
+/** About as many frames as can really be looked at in one sitting (~15 contact-sheet pages). */
+/** About how many frames a contact sheet page holds. */
+const PER_PAGE = 16;
 
 function fail(msg) {
   console.error(`curate: ${msg}`);
@@ -75,15 +88,18 @@ async function newDir(parent, prefix) {
   }
 }
 
-/** Folders holding photos, skipping our own output folders. */
-async function photoDirs(dir, out = new Set()) {
+/** Folders holding photos, and how many viewable frames, skipping our own output folders. */
+async function photoDirs(dir, out = new Set(), count = { frames: 0 }) {
   for (const e of await fs.readdir(dir, { withFileTypes: true })) {
     if (e.name.startsWith(".") || OURS.test(e.name)) continue;
     const full = path.join(dir, e.name);
-    if (e.isDirectory()) await photoDirs(full, out);
-    else if (PHOTO.test(e.name)) out.add(dir);
+    if (e.isDirectory()) await photoDirs(full, out, count);
+    else if (PHOTO.test(e.name)) {
+      out.add(dir);
+      if (VIEWABLE.test(e.name)) count.frames++;
+    }
   }
-  return out;
+  return { dirs: out, frames: count.frames };
 }
 
 /** Safe in a file name, still readable: "Ștefan & Ana — nuntă" → "Stefan-Ana-nunta". */
@@ -107,8 +123,14 @@ async function load(folder) {
   if (!CURATE_DIR.test(path.basename(dir))) fail(`${dir} isn't a _curate_YYYY-MM-DD folder`);
   const names = await fs.readdir(dir);
   let effort;
-  for (const f of names.filter((n) => n.endsWith(".json"))) {
-    const data = JSON.parse(await fs.readFile(path.join(dir, f), "utf8"));
+  // Hidden files are skipped: external drives add `._name.json` shadow copies (macOS AppleDouble).
+  for (const f of names.filter((n) => n.endsWith(".json") && !n.startsWith("."))) {
+    let data;
+    try {
+      data = JSON.parse(await fs.readFile(path.join(dir, f), "utf8"));
+    } catch {
+      continue; // not ours
+    }
     if (data.kind === "curation") effort = { dir, data, dataPath: path.join(dir, f), reportPath: path.join(dir, `${data.id}.md`) };
   }
   if (!effort) fail(`no curation data in ${dir}; start with \`open\``);
@@ -117,7 +139,7 @@ async function load(folder) {
     const sheetDirs = names.filter((n) => /^contactsheet_\d{4}-\d{2}-\d{2}(-\d+)?$/.test(n)).sort((x, y) => x.localeCompare(y, undefined, { numeric: true }));
     let sheetFile = null;
     for (const d of sheetDirs.reverse()) {
-      const json = (await fs.readdir(path.join(dir, d))).find((n) => n.endsWith(".json"));
+      const json = (await fs.readdir(path.join(dir, d))).find((n) => n.endsWith(".json") && !n.startsWith("."));
       if (json) {
         sheetFile = path.join(d, json);
         break;
@@ -164,9 +186,49 @@ function resolve(effort, list) {
 }
 
 async function open(args) {
-  const folder = path.resolve(args[0] || fail("usage: open <folder> [--name subject]"));
-  const dirs = [...(await photoDirs(folder).catch(() => fail(`can't read ${folder}`)))];
+  const result = await openEffort(path.resolve(args[0] || fail("usage: open <folder> [--name subject] [--review]")), args);
+  console.log(JSON.stringify(result, null, 2));
+}
+
+/** How big a folder is, and the two ways in. Writes nothing; the decision is whoever curates. */
+async function measure(args) {
+  const folder = path.resolve(args[0] || fail("usage: measure <folder>"));
+  const found = await photoDirs(folder).catch(() => fail(`can't read ${folder}`));
+  if (!found.dirs.size) fail(`no photos in ${folder}`);
+  const shoots = new Set([...found.dirs].map((d) => shootOf(d, folder))).size;
+  console.log(
+    JSON.stringify(
+      {
+        folder,
+        frames: found.frames,
+        folders: found.dirs.size,
+        shoots,
+        pages: Math.ceil(found.frames / PER_PAGE),
+        decide: "Can you really look at every one of these frames? Then curate it whole. If not, review it: a snapshot of every shoot, then which folders to curate.",
+        curate: [`curate.mjs open "${folder}"`, `contactsheet.mjs sheet "${folder}" --max all --out <_curate folder>`],
+        review: [`curate.mjs open "${folder}" --review`, `scan.mjs update "${folder}" --out <_curate folder>`, `contactsheet.mjs sheet "${folder}" --sample --out <_curate folder>`],
+      },
+      null,
+      2,
+    ),
+  );
+}
+
+/** A dated shoot folder below the root, else the folder itself (as contactsheet --sample groups them). */
+const DATED = /^(\d{4}[-_]\d{2}[-_]\d{2}|\d{2}[-_]\d{2}[-_]\d{4}|(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]* \d{4})/i;
+function shootOf(dir, root) {
+  const parts = path.relative(root, dir).split(path.sep).filter(Boolean);
+  const at = parts.findIndex((p) => DATED.test(p));
+  return at > -1 ? parts.slice(0, at + 1).join("/") : parts.join("/");
+}
+
+/** A new effort for one folder: a curation, or with --review a review of a big archive. */
+async function openEffort(folder, args = []) {
+  const found = await photoDirs(folder).catch(() => fail(`can't read ${folder}`));
+  const dirs = [...found.dirs];
   if (!dirs.length) fail(`no photos in ${folder}`);
+  // Too much to look at frame by frame: review the archive first, then curate folder by folder.
+  const mode = args.includes("--review") ? "review" : "curation";
   const source = commonParent(dirs);
   const nameAt = args.indexOf("--name");
   const subject = slug((nameAt > -1 && args[nameAt + 1]) || sourceLabel(folder));
@@ -177,8 +239,9 @@ async function open(args) {
     id,
     subject,
     created: now(),
+    mode, // curation: every frame; review: a sampled look at a big archive, ending in which folders to curate
     status: "open", // open → proposed → selected
-    source: { folder: source, asked: folder, sheet: null, frames: null },
+    source: { folder: source, asked: folder, sheet: null, frames: null, viewable: found.frames, folders: dirs.length },
     frames: [],
     curator: null,
     impression: null,
@@ -188,12 +251,45 @@ async function open(args) {
     sets: [],
     nearDuplicates: [],
     questions: [],
+    review: null,
     selections: [],
-    history: [{ at: now(), event: "opened" }],
+    history: [{ at: now(), event: `opened (${mode}, ${found.frames} viewable frames in ${dirs.length} folders)` }],
   };
   const dataPath = path.join(dir, `${id}.json`);
   await fs.writeFile(dataPath, JSON.stringify(data, null, 2));
-  console.log(JSON.stringify({ folder: dir, id, report: path.join(dir, `${id}.md`), data: dataPath, next: `contactsheet.mjs sheet "${folder}" --max all --out "${dir}"` }, null, 2));
+  const sheet = mode === "review" ? "--sample" : "--max all";
+  return {
+    folder: dir,
+    id,
+    mode,
+    frames: found.frames,
+    pages: mode === "review" ? null : Math.ceil(found.frames / PER_PAGE),
+    folders: dirs.length,
+    report: path.join(dir, `${id}.md`),
+    data: dataPath,
+    // A review keeps its own snapshot of the archive inside it, then looks at a sample.
+    next: [...(mode === "review" ? [`scan.mjs update "${folder}" --out "${dir}"`] : []), `contactsheet.mjs sheet "${folder}" ${sheet} --out "${dir}"`],
+  };
+}
+
+/** "Go": a curation for each folder a review proposed. Each one's size is in its output, to decide on. */
+async function next(args) {
+  const review = await load(args[0] || fail("usage: next <review _curate folder> [<folder>...]"));
+  if (review.data.mode !== "review") fail(`${review.dir} is a curation, not a review`);
+  const folders = args.slice(1).filter((a) => !a.startsWith("--")).length ? args.slice(1).filter((a) => !a.startsWith("--")) : review.data.review?.next || [];
+  if (!folders.length) fail("the review proposes no folders yet: write its plan with review.next, or name the folders");
+  const base = review.data.source.folder;
+  const opened = [];
+  for (const f of folders) {
+    const folder = path.resolve(base, f);
+    if (!existsSync(folder)) fail(`"${f}" isn't in ${base}`);
+    opened.push({ asked: f, ...(await openEffort(folder)) });
+  }
+  const log = opened.map((o) => ({ folder: o.asked, effort: path.relative(base, o.folder), mode: o.mode, at: now() }));
+  review.data.review = { ...review.data.review, opened: [...(review.data.review?.opened || []), ...log] };
+  review.data.history.push({ at: now(), event: `opened ${opened.length} curation${opened.length > 1 ? "s" : ""}: ${folders.join(", ")}` });
+  await save(review);
+  console.log(JSON.stringify(opened, null, 2));
 }
 
 async function write(args) {
@@ -211,7 +307,16 @@ async function write(args) {
     }
     for (const group of plan.nearDuplicates || []) resolve(effort, group.frames || group);
     for (const section of plan.article?.sections || []) section.frames = resolve(effort, section.frames || []);
-    for (const key of ["curator", "impression", "story", "brief", "summary", "sets", "nearDuplicates", "questions", "article"]) if (key in plan) effort.data[key] = plan[key];
+    if (plan.review) {
+      // Which folders are worth their own curation: each must exist under the source.
+      for (const f of plan.review.folders || []) {
+        if (!f.folder) fail("every review folder needs a folder (relative to the source)");
+        if (!existsSync(path.join(effort.data.source.folder, f.folder))) fail(`review folder "${f.folder}" isn't in ${effort.data.source.folder}`);
+        if (f.frames) f.frames = resolve(effort, f.frames);
+      }
+      for (const f of plan.review.next || []) if (!existsSync(path.join(effort.data.source.folder, f))) fail(`next folder "${f}" isn't in ${effort.data.source.folder}`);
+    }
+    for (const key of ["curator", "impression", "story", "brief", "summary", "sets", "nearDuplicates", "questions", "article", "review"]) if (key in plan) effort.data[key] = plan[key];
     // Per-frame notes: what the curator saw in each frame, kept for search and later context.
     for (const entry of plan.catalogue || []) {
       const [n] = resolve(effort, [entry.n ?? entry.file]);
@@ -376,8 +481,10 @@ async function status(args) {
       {
         folder: dir,
         id: data.id,
+        mode: data.mode ?? "curation",
         status: data.status,
         sheet: data.source.sheet,
+        ...(data.review?.next ? { curateNext: data.review.next } : {}),
         sets: data.sets.map((s) => ({ key: s.key, title: s.title, frames: s.frames })),
         questions: data.questions,
         selections: data.selections.map((s) => ({ folder: s.folder, set: s.set, frames: s.frames })),
@@ -389,6 +496,6 @@ async function status(args) {
 }
 
 const [cmd, ...rest] = process.argv.slice(2);
-const commands = { open, write, select, pdf, status };
-if (!commands[cmd]) fail("commands: open, write, select, pdf, status (see the header of this file)");
+const commands = { measure, open, next, write, select, pdf, status };
+if (!commands[cmd]) fail("commands: measure, open, next, write, select, pdf, status (see the header of this file)");
 await commands[cmd](rest);

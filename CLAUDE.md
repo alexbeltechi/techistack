@@ -1,7 +1,7 @@
 # techistack
 
-Agent skills for curating creative work: `skills/contactsheet` and
-`skills/curate`. This repo is where they're developed; the published plugin
+Agent skills for curating creative work: `skills/scan`,
+`skills/contactsheet` and `skills/curate`. This repo is where they're developed; the published plugin
 is what other people install.
 
 ## Working on the skills
@@ -13,14 +13,26 @@ is what other people install.
 - `skills/curate/lessons.md` is the maintainer's own taste. It's git-ignored
   and must never be committed or published; `lessons.example.md` is the
   public starting point.
-- Keep the skills free of anyone's personal paths, names or projects. Docs
-  and examples use mock data (`~/Pictures/2024/studio-visit`).
+- Keep the skills free of anyone's personal paths, names or projects. Docs,
+  examples and code comments use mock data (`~/Pictures/2024/studio-visit`,
+  `IMG_4821.jpg`), never a real shoot, person or client. The files the
+  skills write into a user's own archive (scan maps, reports) may hold
+  their names; they stay on the user's disk.
 
 ## Rules the skills must keep
 
 - Never delete anything in a source folder. Originals are read-only; the
   skills only add new, dated `contactsheet_…`, `_curate_…` and `selection_…`
-  folders, and never overwrite.
+  folders, and never overwrite. The one exception is `/scan`'s single
+  `_scan_YYYY-MM-DD` folder at an archive's root: it's updated in place
+  (renamed to the new date, its two index files replaced), and nothing else
+  in it is touched. A /curate review keeps its scan as a snapshot inside its
+  own `_curate_…` folder instead.
+- No size limits in the scripts. How much can really be looked at is the
+  agent's call: scripts report size (frames, shoots, pages) and offer both
+  ways in, never a fixed threshold. Agents see more every year.
+- Every walk skips the others' folders (`contactsheet_…`, `_curate_…`,
+  `selection_…`, `_scan_…`), so no skill reads its own output as work.
 - What's fine to show is the user's call: no content flagging.
 - Test on copies in a scratch folder, never on real archives.
 
@@ -39,7 +51,9 @@ node skills/curate/scripts/curate.mjs open /tmp/ts-test/shoot
 ```
 
 Then `write` a small plan, `pdf`, and `select`, and look at the output:
-the white and black sheets, the article PDF, a selection.
+the white and black sheets, the article PDF, a selection. For `/scan`:
+`update` the test folder, add a file, `status`, `update` again, and read the
+map (`_scan_…/*.md`).
 
 ## Releasing
 

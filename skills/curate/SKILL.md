@@ -40,7 +40,8 @@ user's corrections, and they override the general guidance.
   means removing it. (Culling, if it ever comes, is a separate skill.)
 - **Originals are read-only.** Never move, rename, edit, convert or delete a
   source file. The only things added to an archive are new `contactsheet_…`
-  and `_curate_…` folders (selections live inside the latter).
+  and `_curate_…` folders (selections live inside the latter), and the
+  `/scan` index's one `_scan_…` folder.
 - **Every run is a new effort.** Don't write into an earlier `_curate_`
   folder except to add selections to that same effort. A second look on the
   same day is `-2`.
@@ -61,7 +62,11 @@ own site or portfolio, write the assumption into the brief, and carry on.
 
 ## 2. Survey
 
-`/contactsheet` scan over the scope. Rank folders by promise: exported picks
+First `/scan` status on the scope: if the archive has a scan, update it when
+something changed and read its map. "Where to look" and "already curated"
+are the shortlist's start, and the notes say what folders are. On a large
+archive with no scan, offer to make one first. Without one, `/contactsheet`
+scan over the scope. Rank folders by promise: exported picks
 exist, a clear subject, enough frames to make a set. Note mixes (several
 shoots in one folder) and raw-only folders. If the user's published work is
 readable, check it so you don't propose duplicates. When choosing between
@@ -69,15 +74,85 @@ folders, shortlist up to 3 and open one effort per folder you propose from.
 
 ## 3. Open the effort and see
 
+First, how big is it?
+
+```bash
+node <skill>/scripts/curate.mjs measure "<folder>"
+```
+
+It writes nothing. It says how many frames, folders and shoots there are,
+about how many sheet pages that makes, and the commands for both ways in.
+**You decide**: can you really look at every one of these frames, now?
+There's no number in the tool for this, on purpose, because what an agent
+can take in grows every year. Judge it honestly: skimming 60 pages isn't
+looking. If you can, curate it whole:
+
 ```bash
 node <skill>/scripts/curate.mjs open "<folder>"
 node <contactsheet skill>/scripts/contactsheet.mjs sheet "<folder>" --max all --out "<_curate folder>"
 ```
 
+If you can't, review it first (below), and tell the user why in a line.
+
 `open` creates the `_curate_…` folder inside the folder that holds the
-photos. Pointing the contact sheet at it makes a new `contactsheet_…` folder
-inside, so an effort can hold several looks; the effort picks up the newest.
-Look at every page, and every frame, before writing.
+photos, counts the frames, and prints the exact sheet command to run next. Pointing the contact sheet at the effort makes a new
+`contactsheet_…` folder inside, so an effort can hold several looks; the
+effort picks up the newest. Look at every page, and every frame, before
+writing.
+
+### A big scope: review first
+
+When there's more than you can really look at frame by frame,
+`open "<folder>" --review` makes the effort a **review**
+(`"mode": "review"`). A review is still /curate: /scan counts what's there,
+and the review looks at a sample of it and judges. The work changes shape:
+
+1. **Snapshot the archive, inside the review:** the first command `open`
+   prints is `scan.mjs update "<folder>" --out "<_curate folder>"`. The scan
+   lands in the review's own `_scan_…` folder, a dependency of this review,
+   compared with the newest earlier scan and carrying its notes forward. Run
+   the review again later and the earlier one still holds the snapshot it
+   was made from.
+2. **See a sample, not everything:** the sheet command is `--sample`: frames
+   from every shoot, more from bigger ones (1 from a handful, up to about 5
+   from hundreds), from its picks when it has them. Evenly spaced through
+   each shoot, so from its start, middle and end, and the same every run.
+   Every shoot is on it, so nothing is judged unseen.
+   Read the snapshot's map alongside it for the counts behind each folder.
+3. **Report on the archive, not on frames** (`references/review-template.md`):
+   the first impression of the whole body of work, what's in it and how it's
+   organised, each folder's strength and why (by sheet numbers), what's
+   strong across folders, what's weak or done, and **which folders to curate
+   next**, in order, with the goal each would serve. No catalogue of every
+   frame, no sets to export.
+4. **The plan** carries the same as data, checked against the disk:
+   ```json
+   { "review": {
+       "folders": [{ "folder": "2024/studio-visit", "verdict": "curate",
+                     "why": "…", "frames": [12, 14] }],
+       "next": ["2024/studio-visit", "2023/road-trip"] } }
+   ```
+   `verdict` is `curate`, `later`, `done` (already curated) or `skip`.
+   Folders are relative to the effort's source folder.
+5. **Write it into the snapshot:** one `scan.mjs note` per folder you
+   judged, so the map remembers ("strong portraits, curate next";
+   "near-duplicates of 2023/road-trip, skip"). The next scan carries the
+   notes forward.
+6. **Stop and offer the three:** close with
+   > I've scanned the archive. We can start with these three:
+   > 1. `<folder>`: why
+   > 2. `<folder>`: why
+   > 3. `<folder>`: why
+   >
+   > Say go and I'll open a curation for each.
+
+   On "go" (or with the user's own list instead):
+   ```bash
+   node <skill>/scripts/curate.mjs next "<review _curate folder>" [<folder>...]
+   ```
+   This opens one curation per folder; each one's output says its size.
+   Curate them one by one, from step 3. If one is still more than you can
+   look at, say so and review that one first.
 
 If the user says to leave certain images out ("not 000049 and 000050"), pass
 them to the contact sheet with `--exclude 000049,000050`. Then they're nowhere
@@ -85,6 +160,10 @@ in the effort: not on the sheet, in the numbering, the catalogue, a set or an
 export. Note it in the report's brief and closing line. Never delete them.
 
 ## 4. Report
+
+(A review writes `references/review-template.md` and a `review` plan
+instead, as above, then stops at "curate next". Everything below is for a
+curation.)
 
 One markdown file holds everything. Write it and a plan in the scratchpad,
 then save both into the effort:
@@ -204,7 +283,9 @@ shape:
 > **original** (the files as they are) · **large** (full resolution, high
 > quality JPEG) · **web** (2560 px, the default) · **small** (1200 px).
 
-Plus the open questions. **Stop.** The effort waits on disk; the answer can
+Plus the open questions. If a scan covers the folder, leave a one-line note
+on it (`scan.mjs note "<folder>" "…"`): what the work is and the strongest
+set, so the next look at the archive starts there. **Stop.** The effort waits on disk; the answer can
 come in a later session (`curate.mjs status` shows where it stands).
 
 ## 6. Select (as often as asked)

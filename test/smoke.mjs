@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * End-to-end smoke test for both skills, on a generated archive in a temp
+ * End-to-end smoke test for all three skills, on a generated archive in a temp
  * folder (never on real work). Run after `npm install` in each skill:
  *
  *   node test/smoke.mjs
@@ -23,6 +23,7 @@ const sharp = require("sharp");
 const { PDFDocument } = require("pdf-lib");
 const CS = path.join(repo, "skills/contactsheet/scripts/contactsheet.mjs");
 const CU = path.join(repo, "skills/curate/scripts/curate.mjs");
+const SC = path.join(repo, "skills/scan/scripts/scan.mjs");
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "techistack-smoke-"));
 const A = path.join(root, "Archive", "2024");
@@ -95,7 +96,14 @@ let sheet;
 await check("sheet, white and black", () => {
   sheet = json(CS, "sheet", path.join(A, "road trip"), "--max", "all");
   const names = sheet.files.map((f) => path.basename(f));
-  return sheet.shown === 9 && names.some((n) => n.endsWith("_black.pdf")) && names.some((n) => /_black_p01\.jpg$/.test(n)) && names.some((n) => /\d_road-trip\.pdf$/.test(n));
+  return (
+    sheet.shown === 9 &&
+    names.some((n) => /^contactsheetwhite_\d{4}-\d{2}-\d{2}_road-trip\.pdf$/.test(n)) &&
+    names.some((n) => /^contactsheetwhite_.*_p01\.jpg$/.test(n)) &&
+    names.some((n) => /^contactsheetblack_.*_road-trip\.pdf$/.test(n)) &&
+    names.some((n) => /^contactsheetblack_.*_p01\.jpg$/.test(n)) &&
+    /^contactsheet_\d{4}-\d{2}-\d{2}_road-trip\.json$/.test(path.basename(sheet.manifest))
+  );
 });
 await check("broken frames reported", () => sheet.failed === 2);
 await check("all pages, a4, exclude", () => json(CS, "sheet", path.join(A, "roll"), "--max", "all", "--paper", "a4", "--exclude", "000003,000004.jpg").shown === 28);
@@ -113,9 +121,120 @@ await check("pick", () => {
   return json(CS, "pick", m, "7")[0].path.endsWith("000007.jpg");
 });
 await check("PDF credit links to the repo", async () => {
-  const doc = await PDFDocument.load(fs.readFileSync(sheet.files.find((f) => f.endsWith("_black.pdf"))));
+  const doc = await PDFDocument.load(fs.readFileSync(sheet.files.find((f) => path.basename(f).startsWith("contactsheetblack_") && f.endsWith(".pdf"))));
   return doc.getPages().every((p) => String(p.node.Annots()?.lookup(0)).includes("github.com/alexbeltechi/techistack"));
 });
+
+// Big archives: no frame-by-frame look at more than can be seen
+const BIG = path.join(root, "big-archive");
+const tiny = await sharp({ create: { width: 60, height: 40, channels: 3, background: "#888" } }).jpeg().toBuffer();
+for (let d = 1; d <= 8; d++) {
+  fs.mkdirSync(path.join(BIG, `shoot-${d}`, "export"), { recursive: true });
+  for (let i = 1; i <= 40; i++) fs.writeFileSync(path.join(BIG, `shoot-${d}`, "export", `IMG_${String(i).padStart(4, "0")}.jpg`), tiny);
+}
+await check("--sample: every shoot, more from bigger ones", () => {
+  // roll 30 → 3, road trip 9 → 2, the wedding's one frame → 1
+  const m = JSON.parse(fs.readFileSync(json(CS, "sheet", A, "--sample", "--format", "pdf").manifest, "utf8"));
+  return m.shown === 6 && m.sampling.shoots === 3 && m.sampling.of === 3;
+});
+await check("--sample within --max, one per shoot at least", () => {
+  const m = JSON.parse(fs.readFileSync(json(CS, "sheet", BIG, "--sample", "--max", "10", "--format", "pdf").manifest, "utf8"));
+  return m.shown === 8 && m.sampling.shoots === 8;
+});
+await check("--sample takes a shoot's picks, else skips camera JPEGs next to raws", () => {
+  const S = path.join(root, "sample-archive");
+  for (const f of ["one/Digital/a1.jpg", "one/Digital/a1.NEF", "one/_export/e1.jpg", "two/Digital/b1.jpg", "two/Digital/b1.NEF", "two/Digital/b2.jpg"]) {
+    fs.mkdirSync(path.dirname(path.join(S, f)), { recursive: true });
+    fs.writeFileSync(path.join(S, f), f.endsWith(".NEF") ? "raw" : tiny);
+  }
+  const m = JSON.parse(fs.readFileSync(json(CS, "sheet", S, "--sample", "--format", "pdf", "--out", path.join(root, "out-sample")).manifest, "utf8"));
+  return m.frames.map((f) => path.basename(f.path)).join() === "e1.jpg,b2.jpg";
+});
+await check("--sample: a dated folder is one shoot, however deep it goes", () => {
+  const S = path.join(root, "sample-archive", "Client");
+  for (const f of ["2024-05-01_Look/Digital/r1/black/1.jpg", "2024-05-01_Look/Digital/r2/white/2.jpg", "2024-05-01_Look/Digital/Select/3.jpg", "Feb 2026 Retreat/Photos/2026/2026-03-01/4.jpg"]) {
+    fs.mkdirSync(path.dirname(path.join(S, f)), { recursive: true });
+    fs.writeFileSync(path.join(S, f), tiny);
+  }
+  const m = JSON.parse(fs.readFileSync(json(CS, "sheet", S, "--sample", "--format", "pdf", "--out", path.join(root, "out-sample")).manifest, "utf8"));
+  return m.sampling.shoots === 2 && m.frames.map((f) => path.basename(f.path)).join() === "3.jpg,4.jpg";
+});
+await check("rows read left to right", () => {
+  const m = JSON.parse(fs.readFileSync(json(CS, "sheet", path.join(A, "roll"), "--max", "8", "--format", "pdf", "--out", path.join(root, "out-rows")).manifest, "utf8"));
+  const [a, b] = m.frames;
+  return a.place.page === b.place.page && Math.abs(a.place.y - b.place.y) < 1 && b.place.x > a.place.x;
+});
+await check("--list: exactly those files, in that order", () => {
+  const list = path.join(root, "list.txt");
+  fs.writeFileSync(list, [path.join(BIG, "shoot-2/export/IMG_0007.jpg"), path.join(BIG, "shoot-1/export/IMG_0001.jpg"), path.join(BIG, "missing.jpg"), ""].join("\n"));
+  const m = JSON.parse(fs.readFileSync(json(CS, "sheet", "--list", list, "--format", "pdf", "--out", path.join(root, "out-list")).manifest, "utf8"));
+  return m.shown === 2 && m.frames[0].path.endsWith("shoot-2/export/IMG_0007.jpg") && m.frames[1].folder === "shoot-1";
+});
+let review;
+await check("curate: a big folder opens as a review, its scan a snapshot inside it", () => {
+  review = json(CU, "open", BIG, "--review");
+  if (review.mode !== "review" || review.frames !== 320 || !review.next[0].startsWith("scan.mjs update") || !review.next[1].includes("--sample")) return false;
+  json(SC, "update", BIG, "--out", review.folder);
+  json(CS, "sheet", BIG, "--sample", "--format", "pdf", "--out", review.folder);
+  const plan = path.join(root, "review.json");
+  fs.writeFileSync(plan, JSON.stringify({ review: { folders: [{ folder: "shoot-3", verdict: "curate", frames: [7] }], next: ["shoot-3", "shoot-5"] } }));
+  json(CU, "write", review.folder, "--plan", plan);
+  fs.writeFileSync(plan, JSON.stringify({ review: { folders: [{ folder: "nope", verdict: "skip" }] } }));
+  const st = json(SC, "status", BIG);
+  return (
+    fails(CU, "write", review.folder, "--plan", plan) &&
+    json(CU, "status", review.folder).curateNext[0] === "shoot-3" &&
+    fs.readdirSync(review.folder).some((n) => /^_scan_\d{4}-\d{2}-\d{2}$/.test(n)) &&
+    !fs.readdirSync(BIG).some((n) => n.startsWith("_scan_")) &&
+    st.fresh === true && st.scan.startsWith(review.folder)
+  );
+});
+await check("curate next: \"go\" opens the proposed folders", () => {
+  const opened = json(CU, "next", review.folder);
+  return opened.length === 2 && opened.every((o) => o.mode === "curation" && fs.existsSync(o.folder)) && json(CU, "status", review.folder).status === "proposed";
+});
+await check("curate measure: the size and both ways in, nothing written, no limit", () => {
+  const before = fs.readdirSync(BIG).length;
+  const m = json(CU, "measure", BIG);
+  const whole = json(CU, "open", BIG);
+  return m.frames === 320 && m.shoots === 8 && m.pages === 20 && m.review.length === 3 && whole.mode === "curation" && !whole.next[0].includes("--force") && before === fs.readdirSync(BIG).length - 1;
+});
+
+// Scan
+await check("scan: none yet", () => json(SC, "status", A).scan === null);
+let index;
+await check("scan: first scan", () => {
+  index = json(SC, "update", A);
+  return index.totals.image >= 38 && index.totals.video === 1 && fs.existsSync(index.md) && /^_scan_\d{4}-\d{2}-\d{2}$/.test(path.basename(index.scan));
+});
+await check("scan: fresh right after", () => json(SC, "status", path.join(A, "roll")).fresh === true);
+await check("scan: note, kept and shown", () => {
+  json(SC, "note", path.join(A, "roll"), "a test roll");
+  return json(SC, "show", path.join(A, "roll")).note === "a test roll" && fs.readFileSync(index.md, "utf8").includes("a test roll");
+});
+await check("scan: other skills skip it", () => json(CS, "scan", A)[0].subfolders.every((d) => !d.dir.includes("_scan_")));
+await check("scan: changes found, updated in place, renamed to today", () => {
+  // On its own archive, so the main one stays as generated.
+  const B = path.join(root, "scan-archive");
+  fs.mkdirSync(path.join(B, "a"), { recursive: true });
+  fs.mkdirSync(path.join(B, "b", "Previews.lrdata"), { recursive: true });
+  for (const f of ["a/1.jpg", "a/2.jpg", "b/3.NEF", "b/3.xmp", "b/Previews.lrdata/p.jpg"]) fs.writeFileSync(path.join(B, f), "x");
+  const first = json(SC, "update", B);
+  if (first.totals.image !== 2 || first.totals.raw !== 1 || first.totals.sidecar !== 1) return false;
+  // As if made on an earlier day.
+  const old = path.join(B, "_scan_2020-01-01");
+  fs.renameSync(first.scan, old);
+  for (const f of fs.readdirSync(old)) fs.renameSync(path.join(old, f), path.join(old, f.replace(/^_scan_\d{4}-\d{2}-\d{2}/, "_scan_2020-01-01")));
+  fs.writeFileSync(path.join(B, "a", "3.jpg"), "x");
+  fs.mkdirSync(path.join(B, "c"));
+  fs.writeFileSync(path.join(B, "c", "4.jpg"), "x");
+  const st = json(SC, "status", B);
+  if (st.fresh || st.changed[0]?.image !== 1 || st.added[0]?.folder !== "c") return false;
+  const second = json(SC, "update", B);
+  const scans = fs.readdirSync(B).filter((n) => n.startsWith("_scan_"));
+  return second.changed === 1 && second.added === 1 && scans.length === 1 && scans[0] === path.basename(first.scan) && fs.readdirSync(second.scan).length === 2;
+});
+await check("scan: subfolder status uses the archive's scan", () => json(SC, "status", path.join(A, "road trip")).folder === "road trip");
 
 // Curate
 const effort = json(CU, "open", path.join(A, "road trip")).folder;
@@ -142,6 +261,8 @@ fs.writeFileSync(
   }),
 );
 await check("curate sheet into the effort", () => json(CS, "sheet", path.join(A, "road trip"), "--max", "all", "--out", effort).shown === 9);
+// External drives add `._…` shadow files next to every file (macOS AppleDouble).
+fs.writeFileSync(path.join(effort, `._${path.basename(effort)}_road-trip.json`), "\u0000\u0005\u0016\u0007    Mac OS X");
 await check("write", () => json(CU, "write", effort, "--report", report, "--plan", plan).status === "proposed");
 await check("bad plan JSON is a plain error", () => {
   fs.writeFileSync(path.join(scratch, "bad.json"), "nope");
@@ -175,7 +296,7 @@ await check("status", () => json(CU, "status", effort).status === "selected");
 const after = snapshot();
 await check("no original changed or removed", () => [...before].every(([f, h]) => after.get(f) === h));
 await check("nothing added outside our dated folders", () =>
-  [...after.keys()].filter((f) => !before.has(f)).every((f) => f.startsWith("out") || f.startsWith("scratch") || /(^|[\\/])(contactsheet|_curate|selection)_\d{4}-\d{2}-\d{2}(-\d+)?[\\/]/.test(f)),
+  [...after.keys()].filter((f) => !before.has(f)).every((f) => f.startsWith("out") || f.startsWith("scratch") || f.startsWith("scan-archive") || f.startsWith("big-archive") || f.startsWith("sample-archive") || f === "review.json" || f === "list.txt" || /(^|[\\/])(contactsheet|_curate|_scan|selection)_\d{4}-\d{2}-\d{2}(-\d+)?[\\/]/.test(f)),
 );
 
 fs.rmSync(root, { recursive: true, force: true });

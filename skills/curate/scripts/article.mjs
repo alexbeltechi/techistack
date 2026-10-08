@@ -29,7 +29,7 @@ const L = {
   maxImage: 440, // tallest a single image may be
   scale: 2.5, // embedded image pixels per point
 };
-const MADE_WITH = "Made with techistack";
+const BRAND = "/techistack";
 const REPO_URL = "https://github.com/alexbeltechi/techistack";
 const INK = { text: rgb(0.1, 0.1, 0.1), dim: rgb(0.45, 0.45, 0.45) };
 
@@ -243,17 +243,17 @@ export async function renderArticle(data, file, { paper = "a4" } = {}) {
     y += 22;
   }
 
-  // Footer on every page: what this is, and where.
+  // Footer on every page, one line: what this is on the left, /techistack (a link) on the right, alike.
   pages.forEach((p, i) => {
     const line = winAnsi(`${data.id}  ·  ${i + 1} / ${pages.length}`);
-    p.drawText(line, { x: (W - f.sans.widthOfTextAtSize(line, 6.5)) / 2, y: L.top / 2, size: 6.5, font: f.sans, color: INK.dim });
-    const mw = f.sans.widthOfTextAtSize(MADE_WITH, 6.5);
-    const mx = (W - mw) / 2;
-    p.drawText(MADE_WITH, { x: mx, y: L.top / 2 - 10, size: 6.5, font: f.sans, color: INK.dim });
+    p.drawText(line, { x: L.side, y: L.top / 2, size: 6.5, font: f.sans, color: INK.dim });
+    const mw = f.sans.widthOfTextAtSize(BRAND, 6.5);
+    const mx = W - L.side - mw;
+    p.drawText(BRAND, { x: mx, y: L.top / 2, size: 6.5, font: f.sans, color: INK.dim });
     const annot = doc.context.obj({
       Type: "Annot",
       Subtype: "Link",
-      Rect: [mx, L.top / 2 - 12, mx + mw, L.top / 2 - 2],
+      Rect: [mx, L.top / 2 - 2, mx + mw, L.top / 2 + 8],
       Border: [0, 0, 0],
       A: { Type: "Action", S: "URI", URI: PDFString.of(REPO_URL) },
     });

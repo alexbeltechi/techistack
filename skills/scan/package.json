@@ -1,0 +1,7 @@
+{
+  "name": "scan",
+  "private": true,
+  "type": "module",
+  "description": "An index of an archive, kept in one _scan folder at its root and updated in place. Never opens or changes a photo.",
+  "dependencies": {}
+}

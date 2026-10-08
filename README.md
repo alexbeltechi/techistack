@@ -8,7 +8,7 @@ agents are good at moving files and bad at taste. hand one an archive and say "p
 
 > **beta: run it on a copy.** techistack never deletes or changes your originals, and it only ever adds its own new, dated folders. still, it's young. point it at a backup or a copy of a folder, not your only one, until you trust it.
 
-**it never deletes anything.** this is people's archive and backup work. sources are read-only. the only things it adds are new `contactsheet_…` and `_curate_…` folders next to your work.
+**it never deletes anything.** this is people's archive and backup work. sources are read-only. the only things it adds are new `contactsheet_…` and `_curate_…` folders next to your work, and one `_scan_…` folder at the root of an archive you scan.
 
 **you choose the way photographers always have.** every contact sheet comes as a PDF and JPG, on white and on black. circle the frames you want on your phone (Files › Markup), cross out the rest, or print it and use a pen. or just write the numbers: "7, 12, 15". your picks go further, into publishing, print, retouching or production.
 
@@ -29,16 +29,18 @@ in Claude Code:
 
 the skills are plain `SKILL.md` folders, so other agents that read skills can use them too: copy `skills/*` into your agent's skills folder.
 
-each skill runs `npm install` once in its own folder (Node 20+; sharp, and pdf-lib for the PDFs). HEIC and raw previews use macOS `sips`.
+`/contactsheet` and `/curate` run `npm install` once in their own folder (Node 20+; sharp, and pdf-lib for the PDFs). `/scan` is plain Node. HEIC and raw previews use macOS `sips`.
 
 ## skills
 
 | skill | use it when |
 |---|---|
+| [`/scan`](./skills/scan/SKILL.md) | you have an archive, however big, and want an agent to know what's in it without looking at everything again. it writes a map into one `_scan_…` folder at the root: what's where, what's promising, what's curated, your notes on each folder. next time it checks the map against the disk first and tells you what changed, then only rereads that. |
 | [`/contactsheet`](./skills/contactsheet/SKILL.md) | you want to see a folder at a glance. it creates a contact sheet of the images, numbered like film proofs, as a PDF you can mark up and a JPG, plus a manifest that maps every number to its file, so you or an agent can pick frames by number. |
 | [`/curate`](./skills/curate/SKILL.md) | you want a curator to go through a body of work. it opens a curation folder with a contact sheet, its report (first impression, the story as it reads it, what to show, in what order and for whom, a catalogue of every frame) and an article PDF, then exports the frames you choose, at the quality you choose, into a selection folder ready for anything. |
 
 ```
+/scan ~/Pictures
 /contactsheet ~/Pictures/2024/road-trip
 /curate ~/Pictures/2024/studio-visit
 ```
@@ -52,13 +54,13 @@ studio-visit/_curate_2026-10-08/
   _curate_2026-10-08_studio-visit.md     the curator's report: one file, everything in it
   _curate_2026-10-08_studio-visit.json   the same as data, for agents
   _curate_2026-10-08_studio-visit.pdf    the article: presentable, printable
-  contactsheet_2026-10-08/               the contact sheet (pdf, jpg pages, on white and black; manifest)
+  contactsheet_2026-10-08/               the contact sheet: contactsheetwhite_… and contactsheetblack_… (pdf, jpg pages), manifest
   selection_2026-10-08/                  an export, when you ask for one
   selection_2026-10-08-2/                another one
 ```
 
 1. **brief:** what's it for, and who's it for? given just a folder, it assumes your own site or portfolio and says so.
-2. **see:** a contact sheet of everything, made inside the curation folder.
+2. **see:** a contact sheet of everything, made inside the curation folder: justified rows that read left to right, like printed proofs. (a big archive is reviewed first, below.)
 3. **report:** in this order:
    - a **first impression**, in the curator's voice;
    - **the story, as it reads it**: observations and deductions from the pictures, names and dates, with guesses marked as guesses;
@@ -70,6 +72,19 @@ studio-visit/_curate_2026-10-08/
 5. **stop.** it asks what you'd like exported.
 6. **select:** say a set ("A as it is"), numbers, circles on the sheet or file names, and a quality: **original** (the files as they are), **large** (full resolution), **web** (2560 px, the default) or **small** (1200 px). each export is its own `selection_…` folder, as many as you like.
 7. **learn:** your corrections go into `lessons.md` and override the defaults next time.
+
+## when the archive is big
+
+nobody can really look at 4,000 pictures, and techistack doesn't pretend to. there's no fixed limit: `curate.mjs measure <folder>` reports how big a folder is (frames, shoots, pages) and offers both ways in, and the agent decides what it can honestly look at. as models see more, that number rises on its own.
+
+when it's too much for one sitting, the curation becomes a **review**:
+
+1. **scan snapshot:** `/scan` counts what's there (files, sizes, exports, raws, what's already curated), without opening a photo. the snapshot is kept inside the review's own folder, so every review keeps the scan it was made from.
+2. **sampled sheet:** a few frames from every shoot, more from bigger ones (1 from a handful, up to about 5 from hundreds), from its exports when it has them, evenly spaced and the same every run.
+3. **a report on the archive:** a verdict per folder, what runs across the work, what's done, and **three folders to curate next**.
+4. **you say go,** and `curate.mjs next` opens a curation for each of the three.
+
+`/scan` on its own keeps one `_scan_…` folder at the archive's root, updated in place. next time it checks the map against the disk first and tells you what changed, then rereads only that.
 
 genre guidance lives in [`skills/curate/references`](./skills/curate/references): portrait in depth, plus starting points for fashion, fine art, travel, design case studies, architecture and events.
 
