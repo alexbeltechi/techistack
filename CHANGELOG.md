@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.1 — 2026-10-08
 
 - `/contactsheet --exclude`: leave named frames out of a sheet. They don't
   appear in the numbering, and the manifest records them under `excluded`.
