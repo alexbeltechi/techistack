@@ -353,5 +353,5 @@ async function status(args) {
 
 const [cmd, ...rest] = process.argv.slice(2);
 const commands = { open, write, select, pdf, status };
-if (!commands[cmd]) fail("commands: open, write, select, status (see the header of this file)");
+if (!commands[cmd]) fail("commands: open, write, select, pdf, status (see the header of this file)");
 await commands[cmd](rest);
