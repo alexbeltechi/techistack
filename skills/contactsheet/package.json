@@ -1,0 +1,10 @@
+{
+  "name": "contactsheet",
+  "private": true,
+  "type": "module",
+  "description": "Numbered contact sheets (PDF + JPG) for folders of photos. Read-only on sources.",
+  "dependencies": {
+    "pdf-lib": "^1.17.1",
+    "sharp": "^0.34.5"
+  }
+}

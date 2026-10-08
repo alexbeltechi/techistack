@@ -1,0 +1,15 @@
+{
+  "name": "techistack",
+  "owner": {
+    "name": "Alex Beltechi",
+    "url": "https://beltechi.com"
+  },
+  "plugins": [
+    {
+      "name": "techistack",
+      "source": "./",
+      "description": "Agent skills for curating creative work: /contactsheet and /curate.",
+      "version": "0.1.0"
+    }
+  ]
+}
