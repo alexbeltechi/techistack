@@ -93,6 +93,12 @@ genre guidance lives in [`skills/curate/references`](./skills/curate/references)
 - **your taste:** copy `skills/curate/lessons.example.md` to `lessons.md`. every time you correct the curator ("too many frames", "never open on a detail"), it adds a line. your lessons stay yours and aren't part of this repo.
 - **your curator:** edit or replace [`curator.md`](./skills/curate/references/curator.md) to change who's writing.
 
+## prompts
+
+not skills: image prompts i keep here so i can copy them anywhere. each is one page, with the prompt in a copy block, what to fill in, and tips around it.
+
+- [chthonic Y3K portrait](./prompts/chthonic-y3k-portrait.md): tribal silhouettes in sci-fi materials against an empty dusk sky. square by default.
+
 ## license
 
 MIT
