@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.8.0 — 2026-11-01
+
+- **`/index`: portable folder notes.** Create searchable `_INDEX.md` notes
+  with observed inventory and known human context; notes travel with folders.
+  Searching the notes does not require the skill. The optional second-brain
+  snapshot tracks last-known locations across roots.
+- `/scan` is now described as a legacy workflow for existing snapshots,
+  incremental whole-tree counts and change reports, and searching curated
+  frames. Use `/index` for new portable folder context.
+
 ## 0.7.0 — 2026-10-08
 
 - **Leave out, without deleting:** `curate.mjs leave-out <_curate folder>

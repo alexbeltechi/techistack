@@ -8,8 +8,8 @@
     {
       "name": "techistack",
       "source": "./",
-      "description": "Agent skills for curating creative work: /scan, /contactsheet and /curate.",
-      "version": "0.7.0"
+      "description": "Agent skills for portable folder indexes and creative work: /index, /contactsheet and /curate, with /scan support for existing snapshots.",
+      "version": "0.8.0"
     }
   ]
 }

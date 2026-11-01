@@ -4,17 +4,17 @@ i'm [alex beltechi](https://beltechi.com). a product designer who codes, and a p
 
 agents are good at moving files and bad at taste. hand one an archive and say "post my best work" and you get slop: the first twenty files, near-duplicates, someone else's shoot that happened to be in the folder.
 
-**techistack is my solution to help agents curate my work.** they look before they choose, they tell you what they see and why it matters, and nothing moves forward until you've picked.
+**techistack is my solution to help agents understand and curate my work.** a portable `_INDEX.md` in each folder says what's there and carries its context when it moves. when the task calls for visual judgment, a separate curator looks before choosing, explains why it matters, and waits for your picks.
 
 > **beta: run it on a copy.** techistack never deletes or changes your originals, and it only ever adds its own new, dated folders. still, it's young. point it at a backup or a copy of a folder, not your only one, until you trust it.
 
-**it never deletes anything.** this is people's archive and backup work. sources are read-only. the only things it adds are new `contactsheet_…` and `_curate_…` folders next to your work, and one `_scan_…` folder at the root of an archive you scan.
+**it never deletes anything.** this is people's archive and backup work. sources are read-only. indexing adds `_INDEX.md` notes beside the folders they describe. the older `/scan` workflow may also leave its existing `_scan_…` snapshot for compatibility. contact sheets and curations live in their own new folders.
 
 **you choose the way photographers always have.** every contact sheet comes as a PDF and JPG, on white and on black. circle the frames you want on your phone (Files › Markup), cross out the rest, or print it and use a pen. or just write the numbers: "7, 12, 15". your picks go further, into publishing, print, retouching or production.
 
 **the curator has a voice.** someone with art running through them, talking to us, the audience, the way a good Nowness film sounds. they observe, then deduce what the work says about the life around it ("one stool, one bowl, water hung from a tree so it stays cool: someone who makes ordinary life work simply, and enjoys it"). opinionated, unhurried, no superlatives. it's a file, [`curator.md`](./skills/curate/references/curator.md): swap in your own.
 
-**it's built for agents as much as for you.** every contact sheet has a JSON manifest: each printed number mapped to its exact file, with size, orientation, capture date and where it sits on the page. every curation has a report in markdown and the same as JSON, with a catalogue of every frame (caption, people, objects, place, light, colour, mood, the words you would search it by) and an article draft any CMS can turn into a post. the next agent reads that instead of looking at your pictures all over again.
+**it's built for agents as much as for you.** each `_INDEX.md` is readable by a person and structured for keyword search or later CMS use; it travels with its folder. Index records names, file types, sizes, and known context without describing unseen media. An optional dated snapshot in a private second brain can combine these notes across drives and show when locations were last verified; it is a map, not a media backup. Visual descriptions and publication-ready selection belong to `/curate`, which creates a report and catalogue for the work it actually sees.
 
 fork it. make it yours.
 
@@ -29,18 +29,20 @@ in Claude Code:
 
 the skills are plain `SKILL.md` folders, so other agents that read skills can use them too: copy `skills/*` into your agent's skills folder.
 
-`/contactsheet` and `/curate` run `npm install` once in their own folder (Node 20+; sharp, and pdf-lib for the PDFs). `/scan` is plain Node. HEIC and raw previews use macOS `sips`.
+`/contactsheet` and `/curate` run `npm install` once in their own folder (Node 20+; sharp, and pdf-lib for the PDFs). `/index` and the legacy `/scan` are plain Markdown and Node workflows. HEIC and raw previews use macOS `sips`.
 
 ## skills
 
 | skill | use it when |
 |---|---|
-| [`/scan`](./skills/scan/SKILL.md) | you have an archive, however big, and want an agent to know what's in it without looking at everything again. it writes a map into one `_scan_…` folder at the root: what's where, what's promising, what's curated, your notes on each folder. next time it checks the map against the disk first and tells you what changed, then only rereads that. |
+| [`/index`](./skills/index/SKILL.md) | you want portable context in each folder. It creates or refreshes `_INDEX.md` with a concise description, searchable keywords, folder facts, and known copy or backup status. The note travels with the folder and is easy to search across mounted drives. It does not inspect every image or video. |
+| [`/scan`](./skills/scan/SKILL.md) | you already have a `_scan_…` snapshot and need its incremental whole-tree counts, change report, or keyword search across frames previously catalogued by `/curate`. It is not needed to search `_INDEX.md` notes. Keep it for those existing snapshots and review workflows; use `/index` for new portable folder context. |
 | [`/contactsheet`](./skills/contactsheet/SKILL.md) | you want to see a folder at a glance. it creates a contact sheet of the images, numbered like film proofs, as a PDF you can mark up and a JPG, plus a manifest that maps every number to its file, so you or an agent can pick frames by number. |
 | [`/curate`](./skills/curate/SKILL.md) | you want a curator to go through a body of work. it opens a curation folder with a contact sheet, its report (first impression, the story as it reads it, what to show, in what order and for whom, a catalogue of every frame) and an article PDF, then exports the frames you choose, at the quality you choose, into a selection folder ready for anything. |
 
 ```
-/scan ~/Pictures
+/index ~/Pictures/2024/road-trip
+/scan ~/Pictures # existing scan workflow only
 /contactsheet ~/Pictures/2024/road-trip
 /curate ~/Pictures/2024/studio-visit
 ```

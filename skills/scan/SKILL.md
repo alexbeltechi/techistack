@@ -1,6 +1,6 @@
 ---
 name: scan
-description: Index an archive of creative work, however large, and keep the index up to date, so an agent knows what's where, what's promising, what's been curated and what changed since last time, without looking at every file again. One _scan folder at the archive's root, updated in place. Use when the user says "scan", "index", "what's in my archive", "what changed", "what haven't I curated", "find my photos of …" (search curated frames by keyword), before /curate or /contactsheet on a big or unfamiliar folder, and at the start of any work on an archive that may already have a scan. Never opens or changes a photo.
+description: Read or update an existing legacy `_scan_…` archive snapshot to retrieve its incremental whole-tree inventory, change report, or keyword search over frames already indexed by /curate. For new portable folder context, use /index. Never opens or changes a photo.
 ---
 
 # Scan
@@ -34,7 +34,7 @@ path inside this skill folder.
 
 ## 1. Check first
 
-At the start of any work on an archive, before scanning or looking:
+When the user requests a legacy scan report, or a workflow needs an existing scan snapshot, check its status before updating or reading the full map:
 
 ```bash
 node <skill>/scripts/scan.mjs status "<folder>"
