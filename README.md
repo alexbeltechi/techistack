@@ -49,7 +49,7 @@ the skills are plain `SKILL.md` folders, so other agents that read skills can us
 
 ## manual folder indexing
 
-`/index` scans the whole selected root, writes one root `_INDEX.md`, and updates a local per-source JSON store. Folder annotations live in the root note; no nested notes are created.
+`/index` scans the whole selected root, writes one root `_INDEX.md`, and updates a local per-source JSON store. Each refreshed root note ends with a linked “Created with TechiStack /index” credit. Folder annotations live in the root note; no nested notes are created.
 
 ```bash
 node skills/index/scripts/index.mjs run "<archive root>" --dry-run

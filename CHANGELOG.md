@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.10.1 — 2026-11-01
+
+- Root Index notes now end with a single linked “Created with TechiStack /index” credit, preserved at the bottom after refreshes and manual edits.
+- Fixed module imports from stdin/evaluation contexts so tools can reuse the local inventory functions without accidentally invoking the CLI.
+
 ## 0.10.0 — 2026-11-01
 
 - `/index` now writes only one `_INDEX.md` at the selected root while recursively inventorying all included descendants. Existing nested notes are read but never modified or automatically deleted.

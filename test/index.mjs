@@ -18,8 +18,13 @@ try{
  for(const rel of ['Catalog','Catalog/Model','Cabin'])await assert.rejects(fs.stat(path.join(root,rel,'_INDEX.md')));
  await assert.rejects(fs.stat(path.join(store,'INDEX.md')));
  const note=await fs.readFile(path.join(root,'_INDEX.md'),'utf8');assert(note.includes('Keep this sentence.'));assert(note.includes('id: "archive-stable"'));assert(!note.includes('Catalog/_INDEX.md'));assert(note.includes('Catalog/Model/'));
+ assert(note.trimEnd().endsWith('<!-- techistack:credit:end -->'));
+ assert.equal(note.split('Created with [TechiStack /index](https://github.com/alexbeltechi/techistack).').length-1,1);
+ await fs.appendFile(path.join(root,'_INDEX.md'),'\nUser note added after the existing footer.\n');
  const rev=await review(store);assert.equal(rev.candidate_duplicates.length,1);assert.equal(rev.identical_content[0].locations.length,3);
- await run(root,store,{});db=await readStore(store);rows=await loadFolders(store,db.sources[0]);assert.equal(rows.find(r=>r.path==='Catalog/Model').id,model.id);assert(db.sources[0].previous);
+ await run(root,store,{});
+ const refreshed=await fs.readFile(path.join(root,'_INDEX.md'),'utf8');assert(refreshed.includes('User note added after the existing footer.'));assert(refreshed.trimEnd().endsWith('<!-- techistack:credit:end -->'));assert.equal(refreshed.split('Created with [TechiStack /index]').length-1,1);
+ db=await readStore(store);rows=await loadFolders(store,db.sources[0]);assert.equal(rows.find(r=>r.path==='Catalog/Model').id,model.id);assert(db.sources[0].previous);
  // A root-only layout cannot prove the identity of a moved child. Preserve its previous location.
  await fs.rename(path.join(root,'Catalog','Model'),path.join(tmp,'offline-model'));await run(root,store,{});
  db=await readStore(store);const matches=(await find(store,['bicycle','catalog'])).matches;assert(matches.some(m=>m.folder_id===model.id&&m.status.includes('not-observed')));
@@ -43,7 +48,9 @@ try{
  // Symlinked notes and Git stores are rejected; CLI works through an installed skill symlink.
  const linkRoot=path.join(tmp,'symlink-note');await fs.mkdir(linkRoot);await fs.symlink(path.join(other,'document.docx'),path.join(linkRoot,'_INDEX.md'));await assert.rejects(run(linkRoot,store,{}));
  const gitRoot=path.join(tmp,'git-root');await fs.mkdir(path.join(gitRoot,'.git'),{recursive:true});await assert.rejects(run(other,path.join(gitRoot,'store'),{}));
- const cli=new URL('../skills/index/scripts/index.mjs',import.meta.url).pathname,alias=path.join(tmp,'alias.mjs');await fs.symlink(cli,alias);assert(JSON.parse(execFileSync(process.execPath,[alias,'find','document','--store',store],{encoding:'utf8'})).matches.length);
+ const cli=new URL('../skills/index/scripts/index.mjs',import.meta.url).pathname;
+ execFileSync(process.execPath,['--input-type=module','-'],{input:'await import('+JSON.stringify(new URL('../skills/index/scripts/index.mjs',import.meta.url).href)+');',encoding:'utf8'});
+ const alias=path.join(tmp,'alias.mjs');await fs.symlink(cli,alias);assert(JSON.parse(execFileSync(process.execPath,[alias,'find','document','--store',store],{encoding:'utf8'})).matches.length);
  assert(JSON.parse(execFileSync(process.execPath,[alias,'find','document'],{encoding:'utf8',env:{...process.env,TECHISTACK_INDEX_STORE:store}})).matches.length);
  assert(JSON.parse(execFileSync(process.execPath,[alias,'find','document','--store',store],{encoding:'utf8',env:{...process.env,TECHISTACK_INDEX_STORE:path.join(tmp,'empty-store')}})).matches.length);
  console.log('PASS: root-only notes, full recursion, preserved context/IDs, missing locations, per-source chunks, latest+previous retention, migration, cross-chunk search, duplicate review, nested code, symlink/Git protection, dry run, and unchanged source files.');

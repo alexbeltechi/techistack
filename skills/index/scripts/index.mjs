@@ -18,7 +18,14 @@ const json=x=>JSON.stringify(x,null,2)+'\n';
 async function exists(p){try{await fs.lstat(p);return true;}catch(e){if(e.code==='ENOENT')return false;throw e;}}
 async function text(p){try{const s=await fs.lstat(p);if(!s.isFile()||s.isSymbolicLink())throw Error('Expected regular file: '+p);return await fs.readFile(p,'utf8');}catch(e){if(e.code==='ENOENT')return '';throw e;}}
 function field(note,key){const fm=note.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/)?.[1]||'';const v=fm.match(new RegExp('^'+key+': *(.*)$','m'))?.[1]?.trim();if(!v)return '';try{return JSON.parse(v);}catch{return v;}}
-function ownContext(note){const outside=note.replace(new RegExp(START+'[\\s\\S]*?'+END),'');return outside.match(/^## Context\s*\n([\s\S]*?)(?=^## |$(?![\s\S]))/m)?.[1]?.trim()||'';}
+const CREDIT_START='<!-- techistack:credit:start -->', CREDIT_END='<!-- techistack:credit:end -->';
+const CREDIT=`${CREDIT_START}\n---\n\nCreated with [TechiStack /index](https://github.com/alexbeltechi/techistack).\n${CREDIT_END}`;
+function stripCredit(note){
+ const clean=note.replace(/<!-- techistack:credit:start -->[\s\S]*?<!-- techistack:credit:end -->/g,'');
+ if(clean.includes(CREDIT_START)||clean.includes(CREDIT_END))throw Error('Malformed Index credit block; repair it before refreshing');
+ return clean;
+}
+function ownContext(note){const outside=stripCredit(note).replace(new RegExp(START+'[\\s\\S]*?'+END),'');return outside.match(/^## Context\s*\n([\s\S]*?)(?=^## |$(?![\s\S]))/m)?.[1]?.trim()||'';}
 function metadata(note,values){
  if(note && !note.startsWith('---\n')&&!note.startsWith('---\r\n'))return note; // never reinterpret arbitrary prose as YAML
  const match=note.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
@@ -44,7 +51,7 @@ function managed(rec,byPath,at){
  s+=`\nExcluded entries: ${skipped}; individual exclusions and scan errors are recorded in the local JSON. Keep source notes and inventories local unless deliberately reviewed for sharing.\n\n${END}`;
  return s;
 }
-function noteFor(rec,byPath,at){
+function noteBodyFor(rec,byPath,at){
  let n=rec.original_note;
  const values={id:rec.id,index_updated_at:at,generated_inventory_at:at};
  if(!n){n=metadata('',{schema:'techistack-index/v3',id:rec.id,index_created_at:at,title:rec.name})+`\n# ${clean(rec.name)}\n\n## Context\n\n## Folder context\n\n## Notes\n\n`;}
@@ -59,6 +66,10 @@ function noteFor(rec,byPath,at){
  // New notes show the map before human-editable sections. Existing prose stays intact.
  if(!rec.original_note){const pos=n.indexOf('\n## Context');return n.slice(0,pos)+'\n\n'+block+'\n'+n.slice(pos);}
  return n.trimEnd()+'\n\n'+block+'\n';
+}
+function noteFor(rec,byPath,at){
+ const body=noteBodyFor({...rec,original_note:stripCredit(rec.original_note)},byPath,at);
+ return body.trimEnd()+'\n\n'+CREDIT+'\n';
 }
 async function digest(p){const h=crypto.createHash('sha256');const f=await fs.open(p,'r');try{for await(const chunk of f.createReadStream())h.update(chunk);return h.digest('hex');}finally{await f.close().catch(()=>{});}}
 async function atomic(p,body){if(await exists(p)){const s=await fs.lstat(p);if(!s.isFile()||s.isSymbolicLink())throw Error('Refuse to replace non-regular file: '+p);}const tmp=p+'.index-tmp-'+crypto.randomUUID();await fs.writeFile(tmp,body,{flag:'wx'});await fs.rename(tmp,p);}
@@ -156,7 +167,7 @@ async function migrate(store,db){
  return out;
 }
 function annotations(note){
- const outside=note.replace(new RegExp(START+'[\\s\\S]*?'+END),'');
+ const outside=stripCredit(note).replace(new RegExp(START+'[\\s\\S]*?'+END),'');
  const block=outside.match(/^## Folder context[^\n]*\n([\s\S]*?)(?=^## |$(?![\s\S]))/m)?.[1]||'';
  const result=new Map();for(const m of block.matchAll(/^### (.+)\s*\n([\s\S]*?)(?=^### |$(?![\s\S]))/gm))result.set(m[1].trim().replace(/\/$/,''),m[2].trim());return result;
 }
@@ -255,4 +266,5 @@ async function main(){
  else if(cmd==='review')console.log(json(await review(store)));
  else throw Error('Usage: index.mjs run <root> [--store <local folder>] [--dry-run] [--hash] [--label <name>] | find <terms...> [--store <folder>] | review [--store <folder>]');
 }
-if(process.argv[1]&&await fs.realpath(process.argv[1])===await fs.realpath(fileURLToPath(import.meta.url)))main().catch(e=>{console.error('index: '+e.message);process.exitCode=1;});
+const invokedPath=process.argv[1]?await fs.realpath(process.argv[1]).catch(()=>null):null;
+if(invokedPath&&invokedPath===await fs.realpath(fileURLToPath(import.meta.url)))main().catch(e=>{console.error('index: '+e.message);process.exitCode=1;});
