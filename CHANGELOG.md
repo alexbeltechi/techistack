@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.10.0 — 2026-11-01
+
+- `/index` now writes only one `_INDEX.md` at the selected root while recursively inventorying all included descendants. Existing nested notes are read but never modified or automatically deleted.
+- Local `index.json` is now a small manifest. Per-source inventories are chunked, with latest + previous retention and versioned export-ready schemas. Recognized v1 stores migrate with a local backup. No local Markdown overview is generated.
+- Root annotations preserve scoped folder context. Nested code projects can be inventoried without writing notes into them; selected Git working roots remain protected.
+- Store defaults are resolved from the executing user’s home; `--store` and `TECHISTACK_INDEX_STORE` customize the destination.
+
 ## 0.9.0 — 2026-11-01
 
 - `/index` now includes a dependency-free, manually run recursive indexer: portable notes at every ordinary folder level plus a local JSON inventory and dated Markdown/JSON snapshots.

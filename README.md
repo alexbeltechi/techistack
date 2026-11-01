@@ -4,17 +4,17 @@ i'm [alex beltechi](https://beltechi.com). a product designer who codes, and a p
 
 agents are good at moving files and bad at taste. hand one an archive and say "post my best work" and you get slop: the first twenty files, near-duplicates, someone else's shoot that happened to be in the folder.
 
-**techistack is my solution to help agents understand and curate my work.** a portable `_INDEX.md` in each folder says what's there and carries its context when it moves. when the task calls for visual judgment, a separate curator looks before choosing, explains why it matters, and waits for your picks.
+**techistack is my solution to help agents understand and curate my work.** one `_INDEX.md` at a selected root shows its folder map; a private local JSON store records the full recursive inventory. when the task calls for visual judgment, a separate curator looks before choosing, explains why it matters, and waits for your picks.
 
-> **beta: run it on a copy.** techistack never deletes or changes your originals, and it only ever adds its own new, dated folders. still, it's young. point it at a backup or a copy of a folder, not your only one, until you trust it.
+> **beta: run it on a copy.** techistack never deletes or changes your originals, and its outputs are root index notes, local inventory data, and generated creative-work folders. still, it's young. point it at a backup or a copy of a folder, not your only one, until you trust it.
 
-**it never deletes anything.** this is people's archive and backup work. sources are read-only. indexing adds `_INDEX.md` notes beside the folders they describe. the older `/scan` workflow may also leave its existing `_scan_…` snapshot for compatibility. contact sheets and curations live in their own new folders.
+**it never deletes originals.** this is people's archive and backup work. sources are read-only. indexing adds or refreshes one `_INDEX.md` at the selected archive root. the older `/scan` workflow may also leave its existing `_scan_…` snapshot for compatibility. contact sheets and curations live in their own new folders.
 
 **you choose the way photographers always have.** every contact sheet comes as a PDF and JPG, on white and on black. circle the frames you want on your phone (Files › Markup), cross out the rest, or print it and use a pen. or just write the numbers: "7, 12, 15". your picks go further, into publishing, print, retouching or production.
 
 **the curator has a voice.** someone with art running through them, talking to us, the audience, the way a good Nowness film sounds. they observe, then deduce what the work says about the life around it ("one stool, one bowl, water hung from a tree so it stays cool: someone who makes ordinary life work simply, and enjoys it"). opinionated, unhurried, no superlatives. it's a file, [`curator.md`](./skills/curate/references/curator.md): swap in your own.
 
-**it's built for agents as much as for you.** each `_INDEX.md` is readable by a person and structured for keyword search or later CMS use; it travels with its folder. Index records names, file types, sizes, and known context without describing unseen media. An optional dated snapshot in a private second brain can combine these notes across drives and show when locations were last verified; it is a map, not a media backup. Visual descriptions and publication-ready selection belong to `/curate`, which creates a report and catalogue for the work it actually sees.
+**it's built for agents as much as for you.** Index records folder/file names, types, sizes, and known context without describing unseen contents. A local JSON manifest points to per-source inventory chunks and retains the latest and previous observations. Search can return last-known locations on disconnected drives. The root Markdown overview is for navigation; visual descriptions and publication selection belong to `/curate`.
 
 fork it. make it yours.
 
@@ -35,7 +35,7 @@ the skills are plain `SKILL.md` folders, so other agents that read skills can us
 
 | skill | use it when |
 |---|---|
-| [`/index`](./skills/index/SKILL.md) | you want portable context in each folder. It creates or refreshes `_INDEX.md` with a concise description, searchable keywords, folder facts, and known copy or backup status. The note travels with the folder and is easy to search across mounted drives. It does not inspect every image or video. |
+| [`/index`](./skills/index/SKILL.md) | you want a recursive inventory with one `_INDEX.md` overview at the selected root and a local, partitioned JSON location map. It records all included descendants without placing notes in them. |
 | [`/scan`](./skills/scan/SKILL.md) | you already have a `_scan_…` snapshot and need its incremental whole-tree counts, change report, or keyword search across frames previously catalogued by `/curate`. It is not needed to search `_INDEX.md` notes. Keep it for those existing snapshots and review workflows; use `/index` for new portable folder context. |
 | [`/contactsheet`](./skills/contactsheet/SKILL.md) | you want to see a folder at a glance. it creates a contact sheet of the images, numbered like film proofs, as a PDF you can mark up and a JPG, plus a manifest that maps every number to its file, so you or an agent can pick frames by number. |
 | [`/curate`](./skills/curate/SKILL.md) | you want a curator to go through a body of work. it opens a curation folder with a contact sheet, its report (first impression, the story as it reads it, what to show, in what order and for whom, a catalogue of every frame) and an article PDF, then exports the frames you choose, at the quality you choose, into a selection folder ready for anything. |
@@ -49,16 +49,18 @@ the skills are plain `SKILL.md` folders, so other agents that read skills can us
 
 ## manual folder indexing
 
-`/index` recursively adds a portable `_INDEX.md` to every ordinary folder. Each note has a small tree, direct-file inventory, child links, and recorded context that stays with it when moved. All common file types are included; the script does not describe unseen document or media contents.
+`/index` scans the whole selected root, writes one root `_INDEX.md`, and updates a local per-source JSON store. Folder annotations live in the root note; no nested notes are created.
 
 ```bash
-node skills/index/scripts/index.mjs run "<archive folder>" --dry-run
-node skills/index/scripts/index.mjs run "<archive folder>"
+node skills/index/scripts/index.mjs run "<archive root>" --dry-run
+node skills/index/scripts/index.mjs run "<archive root>"
 node skills/index/scripts/index.mjs find "client name"
 node skills/index/scripts/index.mjs review
 ```
 
-The local `~/Documents/Index/INDEX.md` links to dated source snapshots; `index.json` combines recorded sources for offline location searches. Use `--store` to choose another local folder outside Git, and check cloud-sync settings if privacy matters. Disconnected sources remain last-known hints. A duplicate candidate is not permission to delete a copy. After moving folders, refresh the affected roots manually.
+The default is the executing user's `~/Documents/Index`, never the maintainer's machine. Set `TECHISTACK_INDEX_STORE` or `--store` for another local destination. Check cloud-sync settings when privacy matters. `index.json` is a small manifest pointing to source descriptors and chunked inventories; latest + previous versions are retained. There is no local generated `INDEX.md`. The human overview stays at the selected source root.
+
+Moving a child folder alone does not carry the root note. Log moves and refresh the affected roots; report stale/disconnected locations as last known. Duplicate candidates are evidence for review, not permission to delete. See the [JSON schema](skills/index/references/schema.md) for future exports.
 
 ## how /curate works
 

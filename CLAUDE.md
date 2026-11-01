@@ -23,8 +23,8 @@ is what other people install.
 ## Rules the skills must keep
 
 - Never delete anything in a source folder. Originals are read-only. `/index`
-  adds or refreshes one `_INDEX.md` per indexed folder, preserving its stable
-  ID and user-written context. Other skills add new, dated `contactsheet_…`,
+  adds or refreshes one `_INDEX.md` at the selected root, preserving its stable
+  ID and user-written context. Descendants are inventoried in local JSON without new notes. Other skills add new, dated `contactsheet_…`,
   `_curate_…` and `selection_…` folders, and never overwrite. The legacy
   exception is `/scan`'s single
   `_scan_YYYY-MM-DD` folder at an archive's root: it's updated in place
@@ -59,8 +59,8 @@ Then `write` a small plan, `pdf`, and `select`, and look at the output:
 the white and black sheets, the article PDF, a selection. For `/scan`:
 `update` the test folder, add a file, `status`, `update` again, and read the
 map (`_scan_…/*.md`). For `/index`, add a small folder tree to a scratch
-archive, create `_INDEX.md` notes, move a copied folder, and confirm the note
-still describes that folder without relying on its former path.
+archive, confirm that only the selected root receives `_INDEX.md`, verify recursive
+JSON coverage and source partitioning, and preserve last-known records after changes.
 
 ## Releasing
 

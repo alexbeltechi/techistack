@@ -4,10 +4,9 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 const START='<!-- techistack:index:start -->', END='<!-- techistack:index:end -->';
-const CARRY=/<!-- techistack:carry (.*?) -->/;
 const SCHEMA='techistack-local-index/v1';
 const SKIP=new Set(['node_modules','__pycache__','venv','.venv','dist','build']);
 const generated=/^(?:_scan_|_curate_|contactsheet_|selection_)/;
@@ -28,30 +27,30 @@ function metadata(note,values){
  for(const [k,v] of Object.entries(values)){const line=k+': '+JSON.stringify(v);const re=new RegExp('^'+k+':.*$','m');fm=re.test(fm)?fm.replace(re,()=>line):fm+'\n'+line;}
  return '---\n'+fm.trim()+'\n---\n'+(match?note.slice(match[0].length):'');
 }
-function carryOf(note){const m=note.match(CARRY);if(!m)return null;try{return JSON.parse(m[1]);}catch{throw Error('Invalid portable context marker; preserve and repair before indexing');}}
 function mountLabel(root){const parts=root.split(path.sep);return parts[1]==='Volumes'?parts[2]:os.hostname();}
 function fileSummary(files){const c={};for(const f of files)c[f.extension||'(no extension)']=(c[f.extension||'(no extension)']||0)+1;return Object.entries(c).map(([x,n])=>`${n} ${x}`).join(', ')||'No files directly here';}
 function tree(rec,byPath,depth=2,limit=80){const lines=[rec.name+'/'];let clipped=false;function visit(r,prefix,d){if(d>=depth){if(r.children.length)lines.push(prefix+'└── … deeper folders; use the links below');return;}r.children.forEach((name,i)=>{if(lines.length>=limit){clipped=true;return;}const last=i===r.children.length-1;lines.push(prefix+(last?'└── ':'├── ')+clean(name)+'/');const child=byPath.get(r.path==='.'?name:r.path+'/'+name);if(child)visit(child,prefix+(last?'    ':'│   '),d+1);});}visit(rec,'',0);if(clipped)lines.push('… overview shortened; full directory is in the local snapshot');return lines.join('\n');}
 function managed(rec,byPath,at){
- const carry=JSON.stringify(rec.carried_context).replace(/</g,'\\u003c');
- let s=`${START}\n<!-- techistack:carry ${carry} -->\n\n## Folder map\n\n\`\`\`text\n${tree(rec,byPath)}\n\`\`\`\n\nChecked: **${at}** · files listed directly here: **${rec.files.length}** · subfolders: **${rec.children.length}**.\n\n`;
- s+='### Context that travels with this folder\n\n';
- s+='Folder-name clues from its original hierarchy: '+rec.carried_context.origin_labels.map(clean).join(' → ')+'. These labels are clues, not verified subject descriptions.\n\n';
- for(const c of rec.carried_context.confirmed_context)s+=`- Context recorded in ${clean(c.source_title)}: ${c.text}\n`;
- s+='\n';
- if(rec.children.length){s+='### Subfolders\n\n| Folder | Recorded summary / direct file types |\n|---|---|\n';for(const name of rec.children){const c=byPath.get(rec.path==='.'?name:rec.path+'/'+name);s+=`| [${clean(name)}](${href(name)}/_INDEX.md) | ${clean(c?.description||fileSummary(c?.files||[]))} |\n`;}}
- s+='\n### Files\n\n'+fileSummary(rec.files)+'.\n\n';
- if(rec.files.length){s+='<details>\n<summary>All direct filenames and sizes</summary>\n\n| File | Type | Bytes |\n|---|---|---|\n';for(const f of rec.files)s+=`| [${clean(f.name)}](${href(f.name)}) | ${clean(f.extension||'unknown')} | ${f.size_bytes??'unreadable'} |\n`;s+='\n</details>\n';}
- if(rec.skipped.length){const counts={};for(const x of rec.skipped)counts[x.reason]=(counts[x.reason]||0)+1;s+='\nExcluded entries: '+Object.entries(counts).map(([reason,n])=>`${n} (${clean(reason)})`).join('; ')+'. The local JSON records individual excluded names.\n';}
- return s+'\n'+END;
+ const folders=[...byPath.values()], total=folders.reduce((n,r)=>n+r.files.length,0);
+ let s=`${START}\n\n## Archive map\n\n\`\`\`text\n${tree(rec,byPath,3,120)}\n\`\`\`\n\nChecked: **${at}** · recursively observed folders: **${folders.length}** · files: **${total}**. Only this selected root receives a note. The tree is shortened for readability; the local JSON contains the full recursive inventory.\n\n`;
+ s+='### Folder directory\n\n| Folder | Description / direct file types |\n|---|---|\n';
+ const display=folders.filter(r=>r.path!=='.'&&r.path.split('/').length<=3).slice(0,200);
+ for(const r of display)s+=`| [${clean(r.path)}](${href(r.path)}/) | ${clean(r.description||fileSummary(r.files))} |\n`;
+ if(display.length<folders.length-1)s+=`\n${folders.length-1-display.length} deeper/additional folders are listed in the local inventory.\n`;
+ s+='\n### Files directly at this root\n\n'+fileSummary(rec.files)+'.\n\n';
+ for(const f of rec.files.slice(0,100))s+=`- [${clean(f.name)}](${href(f.name)}) — ${f.size_bytes} bytes\n`;
+ if(rec.files.length>100)s+='\nDirect-file list shortened; all filenames are in the local inventory.\n';
+ const skipped=folders.reduce((n,r)=>n+r.skipped.length,0);
+ s+=`\nExcluded entries: ${skipped}; individual exclusions and scan errors are recorded in the local JSON. Keep source notes and inventories local unless deliberately reviewed for sharing.\n\n${END}`;
+ return s;
 }
 function noteFor(rec,byPath,at){
  let n=rec.original_note;
  const values={id:rec.id,index_updated_at:at,generated_inventory_at:at};
- if(!n){n=metadata('',{schema:'techistack-index/v2',id:rec.id,index_created_at:at,title:rec.name})+`\n# ${clean(rec.name)}\n\n## Context\n\n## Notes\n\n`;}
+ if(!n){n=metadata('',{schema:'techistack-index/v3',id:rec.id,index_created_at:at,title:rec.name})+`\n# ${clean(rec.name)}\n\n## Context\n\n## Folder context\n\n## Notes\n\n`;}
  else if(!field(n,'id')){
    if(n.startsWith('---'))n=metadata(n,{id:rec.id});
-   else n=`---\nschema: techistack-index/v2\nid: ${JSON.stringify(rec.id)}\nindex_created_at: ${JSON.stringify(at)}\n---\n\n`+n;
+   else n=`---\nschema: techistack-index/v3\nid: ${JSON.stringify(rec.id)}\nindex_created_at: ${JSON.stringify(at)}\n---\n\n`+n;
  }
  n=metadata(n,values);
  const block=managed(rec,byPath,at), a=n.indexOf(START), b=n.indexOf(END);
@@ -63,93 +62,197 @@ function noteFor(rec,byPath,at){
 }
 async function digest(p){const h=crypto.createHash('sha256');const f=await fs.open(p,'r');try{for await(const chunk of f.createReadStream())h.update(chunk);return h.digest('hex');}finally{await f.close().catch(()=>{});}}
 async function atomic(p,body){if(await exists(p)){const s=await fs.lstat(p);if(!s.isFile()||s.isSymbolicLink())throw Error('Refuse to replace non-regular file: '+p);}const tmp=p+'.index-tmp-'+crypto.randomUUID();await fs.writeFile(tmp,body,{flag:'wx'});await fs.rename(tmp,p);}
-async function outsideGit(store){for(let p=store;;p=path.dirname(p)){if(await exists(path.join(p,'.git')))throw Error('Local index store must be outside a Git working tree: '+store);if(path.dirname(p)===p)break;}}
-async function readStore(store){const s=await text(path.join(store,'index.json'));if(!s)return {schema:SCHEMA,sources:[]};const d=JSON.parse(s);if(d.schema!==SCHEMA||!Array.isArray(d.sources))throw Error('Unrecognized index.json; refusing to overwrite');return d;}
+async function outsideGit(store,label='Local index store'){for(let p=store;;p=path.dirname(p)){if(await exists(path.join(p,'.git')))throw Error(label+' must be outside a Git working tree: '+store);if(path.dirname(p)===p)break;}}
 function candidates(sources){const groups=new Map();for(const s of sources)for(const r of s.folders)for(const f of r.files){if(f.kind!=='file'||f.size_bytes==null)continue;const k=f.name.toLowerCase()+'\0'+f.size_bytes;if(!groups.has(k))groups.set(k,[]);groups.get(k).push({source_id:s.source_id,folder_id:r.id,path:path.join(s.last_known_location,r.path,f.name),sha256:f.sha256||null});}return [...groups.values()].map(g=>[...new Map(g.map(x=>[x.path,x])).values()]).filter(x=>x.length>1);}
 function hashMatches(sources){const groups=new Map();for(const s of sources)for(const r of s.folders)for(const f of r.files){if(!f.sha256)continue;const entry={source_id:s.source_id,path:path.join(s.last_known_location,r.path,f.name)};if(!groups.has(f.sha256))groups.set(f.sha256,[]);groups.get(f.sha256).push(entry);}return [...groups.entries()].map(([sha256,g])=>({sha256,locations:[...new Map(g.map(x=>[x.path,x])).values()]})).filter(g=>g.locations.length>1);}
-function snapshotMD(source){let s=`# ${clean(source.label)} — index snapshot\n\nTaken: ${source.snapshot_at}\n\nLast-known root: ${source.last_known_location}\n\nCoverage: ${source.coverage}; ${source.folders.length} folders; ${source.errors.length} errors. Availability must be checked again when answering a later query.\n\n`;
- const byPath=new Map(source.folders.map(r=>[r.path,r]));s+='```text\n'+tree(source.folders[0],byPath,3,120)+'\n```\n\n## Folder directory\n\n';
- for(const r of source.folders){s+=`### ${clean(r.path)}\n\n${r.description||fileSummary(r.files)}\n\nFolder ID: ${r.id}\n\n[Open folder note](${pathToFileURL(path.join(source.last_known_location,r.path,'_INDEX.md')).href})\n\n`;
- s+='Original hierarchy: '+r.carried_context.origin_labels.map(clean).join(' → ')+'.\n\n';for(const c of r.carried_context.confirmed_context)s+=`${c.text}\n\n`;if(r.context)s+=r.context+'\n\n';
- for(const f of r.files)s+=`- ${clean(f.name)} — ${f.extension||'unknown type'}, ${f.size_bytes??'unknown'} bytes\n`;s+='\n';}
- if(source.unobserved_folders?.length){s+='\n## Previously recorded, not observed in this pass\n\n';for(const r of source.unobserved_folders)s+=`- ${clean(r.path)} — last verified ${r.last_location_verified_at}; ${clean(r.description||r.context||r.carried_context.origin_labels.join(' / '))}\n`;}
- return s;
+
+const MANIFEST='techistack-local-index/v2';
+const SOURCE='techistack-source-index/v2';
+const CHUNK='techistack-folder-chunk/v2';
+const CHUNK_BYTES=5*1024*1024;
+const FILES_PER_PART=1000;
+function refPath(store,ref){
+ if(typeof ref!=='string'||path.isAbsolute(ref)||ref.split('/').includes('..'))throw Error('Invalid local-store reference');
+ const p=path.resolve(store,ref);if(!inside(p,store))throw Error('Reference escapes local store');return p;
+}
+async function readStore(store){
+ const raw=await text(path.join(store,'index.json'));
+ if(!raw)return {schema:MANIFEST,sources:[]};
+ const d=JSON.parse(raw);
+ if(![SCHEMA,MANIFEST].includes(d.schema)||!Array.isArray(d.sources))throw Error('Unknown index.json schema; refusing to overwrite');
+ return d;
+}
+async function descriptor(store,entry){
+ if(entry.folders)return entry; // legacy v1 aggregate
+ const d=JSON.parse(await text(refPath(store,entry.latest)));
+ if(d.schema!==SOURCE||d.source_id!==entry.source_id)throw Error('Invalid source descriptor');return d;
+}
+async function* parts(store,entry){
+ const d=await descriptor(store,entry);
+ if(d.folders){for(const r of [...d.folders,...(d.unobserved_folders||[])])yield {...r,file_part:0,file_parts:1};return;}
+ for(const ref of d.folder_chunks){const c=JSON.parse(await text(refPath(store,ref.path)));if(c.schema!==CHUNK||c.source_id!==d.source_id)throw Error('Invalid folder chunk');for(const r of c.folders)yield r;}
+}
+async function loadFolders(store,entry){
+ if(!entry)return [];
+ const rows=[];let last;
+ for await(const r of parts(store,entry)){
+  if(r.file_part===0){last={...r,files:[...r.files]};delete last.file_part;delete last.file_parts;rows.push(last);}
+  else {if(!last||last.id!==r.id||last.path!==r.path)throw Error('Unordered folder parts');last.files.push(...r.files);}
+ }
+ return rows;
+}
+async function immutable(store,dir,data){
+ const body=json(data),digest=sha(body),ref=dir+'/'+digest+'.json',p=refPath(store,ref);
+ await fs.mkdir(path.dirname(p),{recursive:true});
+ if(await exists(p)){if(await text(p)!==body)throw Error('Content-addressed file conflict: '+ref);}
+ else await fs.writeFile(p,body,{flag:'wx'});
+ return {path:ref,bytes:Buffer.byteLength(body)};
+}
+function sourceSummary(s,latest,previous=null){return {
+ source_id:s.source_id,root_folder_id:s.root_folder_id,label:s.label,
+ last_known_location:s.last_known_location,last_location_verified_at:s.last_location_verified_at,
+ snapshot_at:s.snapshot_at,coverage:s.coverage,folder_count:s.folder_count,
+ file_count:s.file_count,unobserved_folder_count:s.unobserved_folder_count,
+ error_count:s.error_count,latest,previous
+};}
+async function writeSource(store,source,rows,previous=null){
+ const refs=[];let batch=[],size=0;
+ async function flush(){if(!batch.length)return;refs.push(await immutable(store,'sources/'+source.source_id+'/chunks',{schema:CHUNK,source_id:source.source_id,folders:batch}));batch=[];size=0;}
+ const parents=new Map(rows.map(r=>[r.path,r.id]));
+ for(const raw of rows){const r={...raw,kind:'folder',parent_id:raw.parent_id??(raw.path==='.'?null:parents.get(path.posix.dirname(raw.path))??null)};const n=Math.max(1,Math.ceil(r.files.length/FILES_PER_PART));for(let i=0;i<n;i++){
+   const part={...r,files:r.files.slice(i*FILES_PER_PART,(i+1)*FILES_PER_PART),file_part:i,file_parts:n};
+   const bytes=Buffer.byteLength(json(part));if(batch.length&&size+bytes>CHUNK_BYTES)await flush();batch.push(part);size+=bytes;
+ }}
+ await flush();
+ const {folders,unobserved_folders,original_note,...meta}=source;
+ const observed=rows.filter(r=>!r.location_status?.startsWith('not-observed'));
+ const d={...meta,schema:SOURCE,folder_count:observed.length,file_count:observed.reduce((n,r)=>n+r.files.length,0),unobserved_folder_count:rows.length-observed.length,error_count:source.error_count??source.errors?.length??0,folder_chunks:refs};
+ const out=await immutable(store,'sources/'+source.source_id,d);
+ return sourceSummary(d,out.path,previous);
+}
+async function prune(store,entry){
+ const keep=new Set([entry.latest,entry.previous].filter(Boolean));
+ for(const ref of [...keep]){const d=JSON.parse(await text(refPath(store,ref)));for(const c of d.folder_chunks)keep.add(c.path);}
+ const base=path.join(store,'sources',entry.source_id);
+ for(const dir of [base,path.join(base,'chunks')])for(const name of await fs.readdir(dir)){
+  if(!/^[a-f0-9]{64}\.json$/.test(name))continue;
+  const p=path.join(dir,name),rel=path.relative(store,p).split(path.sep).join('/');if(keep.has(rel))continue;
+  const body=await text(p);if(sha(body)+'.json'!==name)continue; // retain modified or unknown files
+  const d=JSON.parse(body);if(d.source_id===entry.source_id&&[SOURCE,CHUNK].includes(d.schema))await fs.unlink(p);
+ }
+}
+async function migrate(store,db){
+ if(db.schema===MANIFEST)return db;
+ const stamp=new Date().toISOString().replace(/[:.]/g,'-');
+ const backup=path.join(store,'migrations','v1-'+stamp);await fs.mkdir(backup,{recursive:true});
+ await fs.writeFile(path.join(backup,'index.json'),json(db),{flag:'wx'});
+ const overview=await text(path.join(store,'INDEX.md'));
+ if(overview.includes('<!-- techistack:local-index -->')){
+  await fs.writeFile(path.join(backup,'INDEX.md'),overview,{flag:'wx'});await fs.unlink(path.join(store,'INDEX.md'));
+ }
+ // v1 snapshots remain untouched as a one-time local archive, never extended by v2.
+ const out={schema:MANIFEST,updated_at:db.updated_at||stamp,sources:[],legacy_snapshot_directory:await exists(path.join(store,'snapshots'))?'snapshots':null};
+ for(const s of db.sources){const rows=[...s.folders,...(s.unobserved_folders||[])];out.sources.push(await writeSource(store,s,rows));}
+ return out;
+}
+function annotations(note){
+ const outside=note.replace(new RegExp(START+'[\\s\\S]*?'+END),'');
+ const block=outside.match(/^## Folder context[^\n]*\n([\s\S]*?)(?=^## |$(?![\s\S]))/m)?.[1]||'';
+ const result=new Map();for(const m of block.matchAll(/^### (.+)\s*\n([\s\S]*?)(?=^### |$(?![\s\S]))/gm))result.set(m[1].trim().replace(/\/$/,''),m[2].trim());return result;
+}
+function changeReport(previous,rows){
+ const byPath=new Map(previous.map(r=>[r.path,r]));const report={};
+ const add=(kind,value)=>{const x=report[kind]??={count:0,examples:[]};x.count++;if(x.examples.length<100)x.examples.push(value);};
+ for(const r of rows){const old=byPath.get(r.path);if(!old)add('new_folders',r.path);else{
+   const files=new Map(old.files.map(f=>[f.name,f]));for(const f of r.files){const o=files.get(f.name);if(!o||o.size_bytes!==f.size_bytes||o.modified_at!==f.modified_at||o.sha256&&f.sha256&&o.sha256!==f.sha256)add('changed_files',path.posix.join(r.path,f.name));files.delete(f.name);}for(const f of files.keys())add('not_observed_files',path.posix.join(r.path,f));
+ }byPath.delete(r.path);}
+ for(const r of byPath.values())add('not_observed_folders',r.path);
+ return report;
 }
 async function run(rootArg,storeArg,{dryRun=false,hash=false,label}={}){
- const root=await fs.realpath(rootArg);
- let store=path.resolve(storeArg), ancestor=store, tail=[];
- while(!await exists(ancestor)){tail.unshift(path.basename(ancestor));ancestor=path.dirname(ancestor);}
- store=path.join(await fs.realpath(ancestor),...tail);
+ const root=await fs.realpath(rootArg);let store=path.resolve(storeArg),ancestor=store,tail=[];
+ while(!await exists(ancestor)){tail.unshift(path.basename(ancestor));ancestor=path.dirname(ancestor);}store=path.join(await fs.realpath(ancestor),...tail);
  if(!(await fs.stat(root)).isDirectory())throw Error('Source must be a directory');
- if(inside(root,store))throw Error('Source cannot be the local index store or a folder inside it');
- await outsideGit(store);
- if(await exists(path.join(root,'.git')))throw Error('Source is a Git working tree; use a plain archive copy to keep personal notes out of commits');
- const at=new Date().toISOString(), folders=[], errors=[];
- async function walk(abs,rel,inherited,labels){
-  let entries;try{entries=await fs.readdir(abs,{withFileTypes:true});}catch(e){errors.push({path:rel,operation:'list',error:e.code});return;}
+ if(inside(root,store))throw Error('Source cannot be inside the local store');
+ await outsideGit(store);await outsideGit(root,'Selected root');
+ const db=await readStore(store),at=new Date().toISOString(),folders=[],errors=[];let errorCount=0;
+ const error=(p,op,e)=>{errorCount++;if(errors.length<100)errors.push({path:p,operation:op,error:e.code||e.message});};
+ const original=await text(path.join(root,'_INDEX.md'));
+ const existing=db.sources.find(s=>s.last_known_location===root);
+ const rootId=field(original,'id')||existing?.root_folder_id||crypto.randomUUID();
+ if(typeof rootId!=='string')throw Error('Invalid root folder ID');
+ const sourceId=sha(rootId+'\0'+root).slice(0,20),prevEntry=db.sources.find(s=>s.source_id===sourceId);
+ const previous=await loadFolders(store,prevEntry),prevByPath=new Map(previous.map(r=>[r.path,r]));
+ const scopedContext=annotations(original);
+ async function walk(abs,rel,parentId,inherited,labels){
+  let entries;try{entries=await fs.readdir(abs,{withFileTypes:true});}catch(e){error(rel,'list',e);return;}
   entries.sort((a,b)=>a.name.localeCompare(b.name));
-  let original='';try{original=await text(path.join(abs,'_INDEX.md'));}catch(e){errors.push({path:rel,operation:'read-note',error:e.message});return;}
-  const id=field(original,'id')||crypto.randomUUID();if(typeof id!=='string')throw Error('Invalid folder ID: '+rel);
-  const context=ownContext(original), contextChain=[...inherited];if(context)contextChain.push({source_id:id,source_title:path.basename(abs),text:context});
-  const oldCarry=carryOf(original);
-  const carried={origin_labels:oldCarry?.origin_labels||[...labels,path.basename(abs)],confirmed_context:[...(oldCarry?.confirmed_context||[])]};
-  // Refresh context from still-present ancestors; preserve earlier context after moves.
-  for(const c of inherited){const i=carried.confirmed_context.findIndex(x=>x.source_id===c.source_id);if(i<0)carried.confirmed_context.push(c);else carried.confirmed_context[i]=c;}
-  const rec={id,path:rel,name:path.basename(abs),description:field(original,'summary')||context.split('\n\n')[0]||'',context,carried_context:carried,children:[],files:[],skipped:[],original_note:original};folders.push(rec);
+  let legacy='';try{legacy=rel==='.'?original:await text(path.join(abs,'_INDEX.md'));}catch(e){error(rel,'read-existing-note',e);}
+  const old=prevByPath.get(rel),id=rel==='.'?rootId:field(legacy,'id')||old?.id||crypto.randomUUID();
+  const context=scopedContext.has(rel)?scopedContext.get(rel):ownContext(legacy)||old?.context||'';
+  const carried={origin_labels:old?.carried_context?.origin_labels||[...labels,path.basename(abs)],confirmed_context:[...inherited]};
+  const chain=[...inherited];if(context)chain.push({source_id:id,source_title:path.basename(abs),text:context});
+  const rec={id,kind:'folder',parent_id:parentId,path:rel,name:path.basename(abs),description:scopedContext.has(rel)?context:field(legacy,'summary')||context.split('\n\n')[0]||old?.description||'',context,carried_context:carried,children:[],files:[],skipped:[]};folders.push(rec);
   for(const ent of entries){if(ent.name==='_INDEX.md')continue;const dest=path.join(abs,ent.name);
    if(ent.name.startsWith('.')||SKIP.has(ent.name)||generated.test(ent.name)||/\.(?:app|photoslibrary|lrdata|lrlibrary)$/i.test(ent.name)||inside(dest,store)){rec.skipped.push({name:ent.name,reason:'system, dependency, generated output, package, or local store'});continue;}
    if(ent.isSymbolicLink()){rec.skipped.push({name:ent.name,reason:'symbolic link; not followed'});continue;}
-   if(ent.isDirectory()){if(await exists(path.join(dest,'.git'))){rec.skipped.push({name:ent.name,reason:'Git working tree; personal notes are excluded by default'});continue;}rec.children.push(ent.name);await walk(dest,rel==='.'?ent.name:rel+'/'+ent.name,contextChain,carried.origin_labels);}
-   else if(ent.isFile()){try{const st=await fs.lstat(dest);if(!st.isFile()||st.isSymbolicLink())throw Error('Entry changed during scan');rec.files.push({name:ent.name,kind:'file',extension:path.extname(ent.name).toLowerCase(),size_bytes:st.size,modified_at:st.mtime.toISOString()});}catch(e){errors.push({path:path.join(rel,ent.name),operation:'stat',error:e.code||e.message});}}
+   if(ent.isDirectory()){rec.children.push(ent.name);await walk(dest,rel==='.'?ent.name:rel+'/'+ent.name,id,chain,carried.origin_labels);}
+   else if(ent.isFile()){try{const st=await fs.lstat(dest);if(!st.isFile()||st.isSymbolicLink())throw Error('Entry changed during scan');rec.files.push({name:ent.name,kind:'file',extension:path.extname(ent.name).toLowerCase(),size_bytes:st.size,modified_at:st.mtime.toISOString()});}catch(e){error(path.posix.join(rel,ent.name),'stat',e);}}
   }
  }
- await walk(root,'.',[],[]);if(!folders.length)throw Error('Root could not be indexed');
- const sourceId=sha(folders[0].id+'\0'+root).slice(0,20);
- if(hash){const sizes=new Map();for(const r of folders)for(const f of r.files){if(!sizes.has(f.size_bytes))sizes.set(f.size_bytes,[]);sizes.get(f.size_bytes).push([r,f]);}for(const group of sizes.values())if(group.length>1)for(const [r,f]of group){try{f.sha256=await digest(path.join(root,r.path,f.name));}catch(e){errors.push({path:path.join(r.path,f.name),operation:'hash',error:e.code||e.message});}}}
- const db=await readStore(store), previous=db.sources.find(s=>s.source_id===sourceId);
- const oldFolders=new Map([...(previous?.unobserved_folders||[]),...(previous?.folders||[])].map(r=>[r.id,r]));
- const changes={new_folders:[],relocated_or_copied_folders:[],not_observed_folders:[],changed_files:[],not_observed_files:[]};
- for(const r of folders){const before=oldFolders.get(r.id);if(!before)changes.new_folders.push(r.path);else{if(before.path!==r.path)changes.relocated_or_copied_folders.push({id:r.id,from:before.path,to:r.path});const oldFiles=new Map(before.files.map(f=>[f.name,f]));for(const f of r.files){const old=oldFiles.get(f.name);if(!old||old.size_bytes!==f.size_bytes||old.modified_at!==f.modified_at||old.sha256&&f.sha256&&old.sha256!==f.sha256)changes.changed_files.push(path.join(r.path,f.name));oldFiles.delete(f.name);}for(const name of oldFiles.keys())changes.not_observed_files.push(path.join(before.path,name));}oldFolders.delete(r.id);}
- for(const r of oldFolders.values())changes.not_observed_folders.push({id:r.id,path:r.path});
- const byPath=new Map(folders.map(r=>[r.path,r])), writes=[];
- for(const r of folders){try{writes.push({r,body:noteFor(r,byPath,at)});}catch(e){errors.push({path:r.path,operation:'prepare-note',error:e.message});}}
- const unobserved=[...oldFolders.values()].map(r=>({...r,last_location_verified_at:r.last_location_verified_at||previous?.snapshot_at,location_status:'not-observed; last-known only'}));
- const source={unobserved_folders:unobserved,previous_snapshot:previous?.snapshot_file||null,source_id:sourceId,root_folder_id:folders[0].id,label:label||mountLabel(root)+' / '+path.basename(root),last_known_location:root,last_location_verified_at:at,location_status:'verified',snapshot_at:at,coverage:errors.length?'partial':'complete-with-exclusions',errors,changes,folders:folders.map(({original_note,...r})=>r)};
- const summary={root,store,source_id:sourceId,folders:folders.length,files:folders.reduce((n,r)=>n+r.files.length,0),errors,changes,dry_run:dryRun};
+ await walk(root,'.',null,[],[]);if(!folders.length)throw Error('Root could not be indexed');
+ if(hash){const sizes=new Map();for(const r of folders)for(const f of r.files){if(!sizes.has(f.size_bytes))sizes.set(f.size_bytes,[]);sizes.get(f.size_bytes).push([r,f]);}for(const group of sizes.values())if(group.length>1)for(const [r,f]of group)try{f.sha256=await digest(path.join(root,r.path,f.name));}catch(e){error(path.posix.join(r.path,f.name),'hash',e);}}
+ const present=new Set(folders.map(r=>r.path));
+ const unobserved=previous.filter(r=>!present.has(r.path)).map(r=>({...r,last_location_verified_at:r.last_location_verified_at||prevEntry.snapshot_at,location_status:'not-observed; last-known only'}));
+ const changes=changeReport(previous,folders);
+ const source={source_id:sourceId,root_folder_id:rootId,label:label||mountLabel(root)+' / '+path.basename(root),last_known_location:root,last_location_verified_at:at,location_status:'verified',snapshot_at:at,coverage:errorCount?'partial':'complete-with-exclusions',errors,error_count:errorCount,changes,conflicts:[]};
+ const byID=new Map();for(const r of folders){if(!byID.has(r.id))byID.set(r.id,[]);byID.get(r.id).push(r.path);}source.conflicts=[...byID.entries()].filter(([,p])=>p.length>1).slice(0,100).map(([id,paths])=>({type:'shared-folder-id',id,paths:paths.slice(0,100)}));
+ const summary={root,store,source_id:sourceId,folders:folders.length,files:folders.reduce((n,r)=>n+r.files.length,0),errors,error_count:errorCount,changes,dry_run:dryRun};
+ const rootRec={...folders[0],original_note:original};const rootBody=noteFor(rootRec,new Map(folders.map(r=>[r.path,r])),at);
  if(dryRun)return summary;
- await fs.mkdir(store,{recursive:true});
- // Serialize writers; no forced recovery of an existing lock.
- const lock=path.join(store,'.index-lock');await fs.mkdir(lock).catch(()=>{throw Error('Index store is locked; inspect .index-lock before retrying');});
+ await fs.mkdir(store,{recursive:true});const lock=path.join(store,'.index-lock');await fs.mkdir(lock).catch(()=>{throw Error('Index store is locked; inspect .index-lock before retrying');});
  try{
   const current=await readStore(store);if(JSON.stringify(current)!==JSON.stringify(db))throw Error('Store changed during scan; rerun');
-  if(await exists(path.join(store,'INDEX.md'))){const old=await text(path.join(store,'INDEX.md'));if(!old.includes('<!-- techistack:local-index -->'))throw Error('Existing INDEX.md is not generated by this indexer');}
-  for(const {r,body}of writes){const dest=path.join(root,r.path,'_INDEX.md');try{if(await text(dest)!==r.original_note)throw Error('Note changed during scan');await atomic(dest,body);}catch(e){errors.push({path:r.path,operation:'write-note',error:e.message});}}
-  source.coverage=errors.length?'partial':'complete-with-exclusions';source.errors=errors;
-  current.sources=current.sources.filter(s=>s.source_id!==sourceId);current.sources.push(source);current.updated_at=at;
-  const sameIds=new Map();for(const r of source.folders){if(!sameIds.has(r.id))sameIds.set(r.id,[]);sameIds.get(r.id).push(r.path);}
-  source.conflicts=[...sameIds.entries()].filter(([,p])=>p.length>1).map(([id,paths])=>({type:'shared-folder-id',id,paths,meaning:'possible copies; not proof of backup completeness'}));
-  const stamp=at.replace(/[:.]/g,'-'), stem=sourceId+'-'+stamp;
-  await fs.mkdir(path.join(store,'snapshots'),{recursive:true});
-  await fs.writeFile(path.join(store,'snapshots',stem+'.json'),json(source),{flag:'wx'});
-  await fs.writeFile(path.join(store,'snapshots',stem+'.md'),snapshotMD(source),{flag:'wx'});
-  source.snapshot_file='snapshots/'+stem+'.md';
-  await atomic(path.join(store,'index.json'),json(current));
-  const duplicates=candidates(current.sources);
-  let md='<!-- techistack:local-index -->\n# Local archive index\n\nLast updated: '+at+'\n\nThese are last-known locations from manual snapshots. Check accessibility and verification dates when searching; unavailable roots are not empty roots. Detailed searchable inventory: `index.json`.\n\n| Source | Last snapshot | Coverage | Root (last known) |\n|---|---|---|---|\n';
-  for(const s of current.sources)md+=`| [${clean(s.label)}](${s.snapshot_file||'#'}) | ${s.snapshot_at} | ${s.coverage} | ${clean(s.last_known_location)} |\n`;
-  if(await exists(path.join(store,'legacy-brain-snapshot.md')))md+='\n[Earlier manually collected location hints](legacy-brain-snapshot.md) — legacy metadata; check its dates and coverage.\n';
-  md+='\n## Optional review\n\n'+duplicates.length+' groups share a filename and size across recorded locations. They are candidates, not verified duplicates; some may be stale locations. Run `review` for details. An agent may suggest organization improvements after reviewing context. No files are moved or deleted by this tool.\n';
-  await atomic(path.join(store,'INDEX.md'),md);
+  if(await text(path.join(root,'_INDEX.md'))!==original)throw Error('Root note changed during scan; rerun');
+  const manifest=await migrate(store,current);
+  await atomic(path.join(root,'_INDEX.md'),rootBody);
+  const prior=manifest.sources.find(s=>s.source_id===sourceId);
+  const entry=await writeSource(store,source,[...folders,...unobserved],prior?.latest||null);
+  manifest.sources=manifest.sources.filter(s=>s.source_id!==sourceId);manifest.sources.push(entry);manifest.updated_at=at;
+  await atomic(path.join(store,'index.json'),json(manifest));
+  await prune(store,entry);
   if(!await exists(path.join(store,'.gitignore')))await fs.writeFile(path.join(store,'.gitignore'),'*\n',{flag:'wx'});
-  summary.snapshot=path.join(store,source.snapshot_file);summary.candidate_groups=duplicates.length;summary.coverage=source.coverage;
+  summary.coverage=source.coverage;summary.latest=refPath(store,entry.latest);summary.previous=entry.previous?refPath(store,entry.previous):null;
  }finally{await fs.rmdir(lock);}
  return summary;
 }
-export {run};
-async function main(){const args=process.argv.slice(2),cmd=args.shift();const opts={};let store=path.join(os.homedir(),'Documents','Index'),rest=[];for(let i=0;i<args.length;i++){const a=args[i];if(a==='--store'||a==='--label'){if(!args[i+1]||args[i+1].startsWith('--'))throw Error('Missing value for '+a);if(a==='--store')store=path.resolve(args[++i]);else opts.label=args[++i];}else if(a==='--dry-run')opts.dryRun=true;else if(a==='--hash')opts.hash=true;else if(a.startsWith('--'))throw Error('Unknown option '+a);else rest.push(a);}
+async function find(store,terms){
+ const db=await readStore(store),matches=[];
+ for(const entry of db.sources){let match;
+  for await(const r of parts(store,entry)){
+   if(r.file_part===0)match={source:entry.label,path:path.join(entry.last_known_location,r.path),folder_id:r.id,last_location_verified_at:r.last_location_verified_at||entry.last_location_verified_at,status:r.location_status||'last-known; check availability',description:r.description,matching_files:[],hits:terms.map(()=>false)};
+   const hay=JSON.stringify(r).toLowerCase();match.hits=match.hits.map((h,i)=>h||hay.includes(terms[i]));
+   for(const f of r.files)if(terms.some(t=>f.name.toLowerCase().includes(t))&&match.matching_files.length<100)match.matching_files.push(f.name);
+   if(r.file_part===r.file_parts-1&&match.hits.every(Boolean)){const {hits,...result}=match;matches.push(result);}
+  }
+ }
+ return {matches,scope:'All recorded sources; last-known locations require live verification.'};
+}
+async function review(store){
+ const db=await readStore(store),sources=[];
+ // Optional cross-source review holds the selected inventories in memory; normal search is chunked.
+ for(const e of db.sources){const d=await descriptor(store,e);sources.push({...e,conflicts:d.conflicts||[],folders:(await loadFolders(store,e)).filter(r=>!r.location_status?.startsWith('not-observed'))});}
+ return {candidate_duplicates:candidates(sources),identical_content:hashMatches(sources),conflicts:sources.flatMap(s=>(s.conflicts||[]).map(c=>({source:s.label,...c}))),note:'Candidates only; verify live locations, dependencies, and backup intent before proposing changes.'};
+}
+export {run,readStore,loadFolders,find,review,writeSource};
+async function main(){
+ const args=process.argv.slice(2),cmd=args.shift(),opts={},rest=[];
+ let store=process.env.TECHISTACK_INDEX_STORE||path.join(os.homedir(),'Documents','Index');
+ for(let i=0;i<args.length;i++){const a=args[i];if(a==='--store'||a==='--label'){if(!args[i+1]||args[i+1].startsWith('--'))throw Error('Missing value for '+a);if(a==='--store')store=path.resolve(args[++i]);else opts.label=args[++i];}else if(a==='--dry-run')opts.dryRun=true;else if(a==='--hash')opts.hash=true;else if(a.startsWith('--'))throw Error('Unknown option '+a);else rest.push(a);}
+ store=path.resolve(store);
  if(cmd==='run'){if(rest.length!==1)throw Error('run requires one folder');console.log(json(await run(path.resolve(rest[0]),store,opts)));}
- else if(cmd==='find'){if(!rest.length)throw Error('find requires search terms');const db=await readStore(store),terms=rest.map(x=>x.toLowerCase());const matches=[];for(const s of db.sources)for(const r of [...s.folders,...(s.unobserved_folders||[])]){const hay=JSON.stringify(r).toLowerCase();if(terms.every(t=>hay.includes(t)))matches.push({source:s.label,path:path.join(s.last_known_location,r.path),folder_id:r.id,last_location_verified_at:r.last_location_verified_at||s.last_location_verified_at,status:r.location_status||'last-known; check availability',description:r.description,matching_files:r.files.filter(f=>terms.some(t=>f.name.toLowerCase().includes(t))).map(f=>f.name)});}console.log(json({matches,scope:'All recorded sources, including potentially disconnected or stale roots. No live verification performed.'}));}
- else if(cmd==='review'){const db=await readStore(store);console.log(json({candidate_duplicates:candidates(db.sources),identical_content:hashMatches(db.sources),conflicts:db.sources.flatMap(s=>(s.conflicts||[]).map(c=>({source:s.label,...c}))),note:'Candidates only. Verify live copies, references, and backup intent before proposing changes. This command writes nothing.'}));}
- else throw Error('Usage: index.mjs run <folder> [--store <local folder>] [--dry-run] [--hash] [--label <name>] | find <terms...> [--store <folder>] | review [--store <folder>]');
+ else if(cmd==='find'){if(!rest.length)throw Error('find requires search terms');console.log(json(await find(store,rest.map(x=>x.toLowerCase()))));}
+ else if(cmd==='review')console.log(json(await review(store)));
+ else throw Error('Usage: index.mjs run <root> [--store <local folder>] [--dry-run] [--hash] [--label <name>] | find <terms...> [--store <folder>] | review [--store <folder>]');
 }
 if(process.argv[1]&&await fs.realpath(process.argv[1])===await fs.realpath(fileURLToPath(import.meta.url)))main().catch(e=>{console.error('index: '+e.message);process.exitCode=1;});

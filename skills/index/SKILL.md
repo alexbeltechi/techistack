@@ -1,73 +1,73 @@
 ---
 name: index
-description: Recursively create portable _INDEX.md folder notes and a local JSON/Markdown location snapshot for files, documents, projects, and media. Use when indexing a folder or drive, refreshing an archive snapshot, or recording context that must travel with moved folders. Manual invocation; no scheduler or uploads.
+description: Scan a selected archive root recursively, write one root _INDEX.md overview, and update a local per-source JSON inventory. Use for manual archive indexing, refreshed location snapshots, or finding recorded files across disconnected sources. No nested note creation, scheduler, or uploads.
 ---
 
 # Index
 
-Index the requested root **recursively**, creating `_INDEX.md` at every ordinary folder level. A root-only overview is not a completed drive index. Cover PDFs, office documents, source files, images, audio, video, and other ordinary files using names, extensions, sizes, and modification dates. Do not visually inspect media or infer document contents from extensions. Ask the user about useful ambiguous context; preserve the answer in the folder's `## Context` section.
+Scan the entire selected root and its included descendants, but create or update **only `<selected root>/_INDEX.md`**. Never create notes at lower levels merely because those folders were traversed. Existing descendant notes can be read for context; they are not changed or automatically removed.
 
-The script is `scripts/index.mjs`, relative to this skill. It uses Node 20+ with no dependencies, network access, background service, or schedule. All commands below run only when requested.
+Cover all ordinary file types—PDFs, office documents, code, photos, audio, video, and other files—using names, extensions, sizes, and modification dates. Do not describe unseen file contents. The script is `scripts/index.mjs`, relative to this skill; it uses Node 20+ with no dependencies or network operations.
 
-## Run a manual indexing pass
+## Manual workflow
 
 ```bash
-node <skill>/scripts/index.mjs run "<folder>" --dry-run
-node <skill>/scripts/index.mjs run "<folder>"
+node <skill>/scripts/index.mjs run "<archive root>" --dry-run
+node <skill>/scripts/index.mjs run "<archive root>"
+node <skill>/scripts/index.mjs find "client name"
+node <skill>/scripts/index.mjs review
 ```
 
-The default local snapshot store is `~/Documents/Index`. Override with `--store "<local folder>"`; use `--label "<human source name>"` to distinguish a source. Confirm the store choice before first use when privacy or cloud syncing matters: a folder under Documents can be cloud-synced even though the script itself never uploads anything. The store must be outside Git working trees. Do not publish personal notes or snapshots.
+The default local store is calculated as `os.homedir()/Documents/Index` on the computer executing the script. It is **not the maintainer's computer or a remote service**. Set `TECHISTACK_INDEX_STORE` or pass `--store "<local folder>"` to override it (`--store` takes precedence). Use `--label "<human source name>"` for a recognizable source label. Other agents can invoke the script by its actual installed skill path; no account, country, drive name, or personal absolute path belongs in this public skill.
 
-1. Confirm the root and the scope. A selected drive includes its nested folders, not only its immediate children. Start with a dry run to see coverage and errors.
-2. Record confirmed descriptions in each relevant folder's `## Context` section. Example: a `Catalog` folder under `Bicycles` is a bicycle catalog only if confirmed or explicitly marked as inferred. Root context applies to all descendants, so put specific context in the narrowest correct folder.
-3. Run the indexer. It preserves stable folder IDs and prose outside its marked generated block. It adds a tree before the editable Context section in new notes, direct file inventory, child-note links, and portable context. Existing notes retain their layout and get a managed section appended or refreshed. Existing v1 frontmatter inventory stays historical; the managed section and local JSON contain the newly measured facts and their date.
-4. Review the generated overview and errors. Report full recursion separately from overview display depth. Trees are shortened for readability; the JSON holds all included folders and direct files. `complete-with-exclusions` means every traversable in-scope folder was read, subject to listed exclusions—not every byte on a drive. Errors make coverage `partial`.
-5. If you add or correct human context after the pass, run again to refresh child context and snapshots. Keep scripts deterministic about facts; the agent supplies interpretation and user-confirmed meaning.
+Confirm the intended source and local store on first use. Documents may itself be cloud-synced; this script does not configure OS sync or upload anything. The store and selected root must be outside Git working trees. A Git project nested beneath a selected archive root is inventoried without writing into it; its hidden internals and dependencies are excluded.
 
-Hidden entries, dependencies, generated build/output folders, app libraries, symlinks, the local store, and nested Git working trees are excluded and recorded. Leading-underscore user folders such as `_Website`, `_export`, and `_audio` are included. A selected Git working tree is rejected to avoid accidentally committing personal notes; use a plain archive copy for this version. Inspect exclusions when relevant material might be inside them.
+1. Dry-run the selected root. Report coverage, exclusions, and errors; a shallow displayed tree is not the scan depth.
+2. Record confirmed overall context in the root note's `## Context`. For scoped folder meaning, use `## Folder context` with `### <relative/path>` headings. Example: `### Catalog` followed by a confirmed description of that folder. Use narrower annotations for narrower meaning. Keep filename-based interpretation explicitly unconfirmed.
+3. Run the scan. It preserves the root note's stable ID, creation date, and prose outside the marked generated block. The generated overview has a compact tree, linked folder directory, descriptions/direct file types, counts, and check date. The tree, directory, and direct-file list are bounded for readability; all included folder/file facts are in local JSON.
+4. Review errors and exclusions. `complete-with-exclusions` means recursive coverage of the included scope, not a byte-for-byte audit of the drive. Errors produce `partial` coverage. Hidden entries, dependency/build folders, app libraries, generated TechiStack outputs, symlinks, and the local store are excluded and recorded. User folders such as `_Website`, `_export`, and `_audio` are included.
+5. Offer optional duplicate/organization review after indexing. Do not execute proposed moves or deletions as part of this pass.
 
-## Two outputs that communicate
+## Root note and local inventory
 
-**Beside the source folders:** `_INDEX.md` is portable context, with stable ID, creation/update dates, the observed original folder hierarchy, inherited recorded context, direct filenames/types/sizes, and child links. Context is copied into each descendant's generated section so a child can make sense after it moves. Only relative links are used inside folder notes. Stable IDs are identity; absolute paths are not.
+The root `_INDEX.md` is a human overview. Edit `## Context`, `## Folder context`, and `## Notes`; the agent can preserve other useful handwritten descriptions too. Do not edit between `<!-- techistack:index:start -->` and `<!-- techistack:index:end -->` unless repairing a malformed block. Existing layouts are preserved; a managed section is appended or refreshed. Legacy frontmatter inventories remain dated historical facts; the new measured facts are in the generated block and JSON.
 
-User prose stays outside `<!-- techistack:index:start -->` and `<!-- techistack:index:end -->`. Do not edit the machine carry marker by hand. Edit `## Context` for confirmed meaning and `## Notes` for other user guidance. Keep inferred descriptions labelled. Existing hand-written summaries and keywords can be retained in frontmatter; the agent may search them too.
+Only the root note travels automatically when that whole root moves. Moving a child folder alone does not carry the root note or guarantee preservation of its local record ID. Log the move, retain its old location as last-known, and refresh the affected selected roots. Never infer a move or complete backup from a matching name. New root locations are recorded separately, rather than silently replacing a potentially disconnected copy.
 
-**In the local store:**
+The local store is:
 
 ```text
 Index/
-  INDEX.md                 readable source list and latest snapshot links
-  index.json               aggregate inventory across all recorded sources
-  snapshots/
-    <source-id>-<time>.md   one dated readable snapshot of a selected root
-    <source-id>-<time>.json matching facts for that pass
+  index.json                       small registry, source summaries and references
+  sources/
+    <source-id>/
+      <content-hash>.json           latest / previous source descriptors
+      chunks/<content-hash>.json    folder/file inventory chunks
+  migrations/                      one-time preserved pre-migration material
 ```
 
-A new pass updates the local overview and JSON while retaining dated snapshots. Sources not scanned remain available as last-known hints. A source is keyed by root folder ID plus observed root location; finding the same root at a new path records another location rather than guessing whether it was moved or copied. Individual folders absent from a rescan are retained as previously recorded/unobserved entries. Prior snapshots preserve earlier file-level observations. This is metadata, not a backup of file contents.
+There is no generated `Index/INDEX.md`, and no endless dated Markdown/JSON snapshot series. Each source retains **latest + previous** inventory versions. After the manifest is committed, unreferenced, unmodified generated descriptors/chunks for that source are pruned. Other sources remain unchanged. User-modified and unknown files are not pruned. Old v1 snapshots are retained as a one-time local archive, not extended.
 
-The JSON records schema, timestamps, source IDs, root location, coverage, errors, folder IDs, summaries, carried context, direct file names/types/sizes/dates, changes, and conflicts. It is readable without the script. A same-ID path change means a relocation or copy candidate, not a verified move. Reused folder IDs at several locations indicate possible copies and are reported; never silently merge them or declare backups complete.
+Large folder inventories are split into file parts; chunks target about 5 MiB. One unusually large folder metadata record may exceed the target. `find` reads chunks sequentially. A scan still holds the chosen source and previous inventory in memory; very large small-file archives should be scanned as narrower selected roots. Optional cross-source `review` is also memory-intensive. Partitioning the store prevents a single aggregate JSON from growing with every source; it is not a claim of unlimited-memory scanning.
 
-## Search and manual moves
+The format supports future export without a fresh disk scan. See [references/schema.md](references/schema.md) when consuming the JSON, implementing an exporter, or changing storage. No Obsidian/database exporter is included yet.
 
-```bash
-node <skill>/scripts/index.mjs find "client name" --store "<local folder>"
-node <skill>/scripts/index.mjs review --store "<local folder>"
-```
+## Search, context, and changes
 
-Searches cover all recorded sources, including disconnected drives. `find` matches all supplied terms against each folder record and its direct files; terms are literal, not semantic. The agent should try user terms, aliases, spelling variants, and existing summaries, then report **all** matching locations with verification dates and coverage. State whether each root was actually checked now; a stored verification date is not live proof. Any agent with file access can also read/search these notes without this skill.
+`find` searches all recorded sources, including disconnected ones. Terms are literal; all supplied terms must match a folder record and its direct files. The agent should try aliases and spelling variants and report all plausible matches with verification dates and coverage. A search does not perform live availability verification. Agents can also read the manifest, follow its JSON references, and search source records without invoking the skill.
 
-When a folder moves, carry its note with it. Log date, source, destination, and verification in the user's task tool if they have authorized that logging. Refresh the source and destination roots manually. A lone file moved without its folder note will not carry folder context; the next inventory must discover it. No background detection is implied.
+The root has a portable ID. Nested folder IDs persist by relative path in the local source inventory; they are not globally stable IDs for arbitrary file moves. Context comes from root annotations, existing notes, and previous local records. All observed folders have explicit parent IDs. Missing folders remain searchable as not-observed/last-known entries; prior file-level facts are also retained in the previous source version. Change summaries contain counts and up to 100 examples per category. A missing item is not proof of deletion.
 
-## Optional organization and duplicate review
+After changes in human context, rescan to update the inventory. When the user has authorized task logging, record a minimal action trail (scope, date, coverage, local snapshot reference), not the full personal inventory. Log moves with source, destination, date, and verification when authorized; the log does not itself update the inventory.
 
-After the pass, offer a review of candidate duplication and organization. Do not treat it as permission to move or delete anything.
+## Optional review
 
-`review` reports same-filename/same-size candidates across the recorded sources plus shared-folder-ID conflicts. These are leads only; stale source records may overlap. For an explicitly requested byte comparison, `run --hash` computes SHA-256 for same-size groups within that source. It can take substantial time on large media. Matching hashes prove identical file contents, not that one copy is unnecessary or that a folder backup is complete.
+`review` reports same-name/same-size candidate groups, recorded shared-ID conflicts, and identical-content groups where hashes exist. These are leads; recorded locations can be stale. `run --hash` is opt-in: it computes SHA-256 for same-size groups within the selected source and may be slow for large media. Matching hashes prove identical contents, not that one copy can safely be removed or that a project backup is complete.
 
-An agent may suggest clearer grouping or consolidation based on recorded context. Present source, proposed destination, reason, comparison evidence, possible broken references (editing projects, code, linked documents), backup intent, and reversal steps. Preserve unknowns. Only execute moves/deletions if the user separately authorizes those concrete changes. This script has no move/delete command.
+An agent can propose more logical grouping after reviewing context. Present source, destination, rationale, comparison evidence, backup intent, possible broken references (editing projects, code, linked documents), and reversal steps. Execute only concrete changes the user authorizes. There are no source move/delete commands in this script.
 
-## Brain entry and publication
+## Migration and privacy
 
-The brain can hold a brief, reviewed pointer to the **local** master index plus the scope/date of the latest pass. Keep detailed locations, client names, filenames, and document context local by default. Do not automatically copy inventories into a Git-tracked brain or Linear. When authorized to log progress, record a minimal action summary and local snapshot pointer rather than the full inventory. The reusable skill and synthetic fixtures can be public; personal outputs cannot be bundled into its release.
+The first writing pass on a recognized v1 local store backs up its aggregate JSON, partitions its source data into v2, and backs up/removes its generated local `INDEX.md` only when that file has the known generated marker. Handwritten overviews remain untouched. Source notes are never deleted by automatic migration. If the user explicitly requests cleanup of earlier generated descendant notes, back them up, verify ownership/IDs and preserve their context in the root annotations/local data, then remove only the authorized notes. Do not delete arbitrary `_INDEX.md` files.
 
-`/curate` remains the opt-in visual review workflow. Legacy `/scan` retains its existing incremental inventory/curated-frame-search behavior; it is not required for Index's folder notes or local snapshots. Index does not have Scan's incremental performance optimization: it reads folder listings and file metadata afresh on each pass, and never treats that as verified file-content equality.
+The brain may hold a reviewed pointer to the local `index.json` and a short pass summary. Detailed inventories, client names, filenames, and context stay local by default. Do not automatically upload them to a brain Git repository or task tool. Public TechiStack updates contain reusable code, schema, and synthetic fixtures only. `/curate` remains the separate opt-in visual workflow; legacy `/scan` is independent.

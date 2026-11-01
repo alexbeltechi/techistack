@@ -1,6 +1,6 @@
 interface:
   display_name: "Index"
-  short_description: "Recursive folder notes and local snapshots"
-  default_prompt: "Use $index to recursively index this source and refresh my local snapshot."
+  short_description: "One root overview and recursive local JSON"
+  default_prompt: "Use $index to scan this archive recursively, write only its root overview, and refresh my local JSON store."
 policy:
   allow_implicit_invocation: true
