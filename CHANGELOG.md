@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.0 — 2026-11-01
+
+- `/index` now includes a dependency-free, manually run recursive indexer: portable notes at every ordinary folder level plus a local JSON inventory and dated Markdown/JSON snapshots.
+- Folder context survives moves; missing folders remain searchable as last-known records. Snapshot coverage, skipped entries, errors, and shared-ID conflicts are explicit.
+- Added local search and optional duplicate review, with opt-in same-size-group hashing. No scheduler, upload, move, or deletion commands.
+- Personal snapshot stores and Git source trees are excluded from publication by default.
+
 ## 0.8.0 — 2026-11-01
 
 - **`/index`: portable folder notes.** Create searchable `_INDEX.md` notes

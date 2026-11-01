@@ -25,4 +25,5 @@ jobs:
         working-directory: skills/contactsheet
       - run: npm ci
         working-directory: skills/curate
+      - run: node test/index.mjs
       - run: node test/smoke.mjs

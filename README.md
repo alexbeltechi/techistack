@@ -29,7 +29,7 @@ in Claude Code:
 
 the skills are plain `SKILL.md` folders, so other agents that read skills can use them too: copy `skills/*` into your agent's skills folder.
 
-`/contactsheet` and `/curate` run `npm install` once in their own folder (Node 20+; sharp, and pdf-lib for the PDFs). `/index` and the legacy `/scan` are plain Markdown and Node workflows. HEIC and raw previews use macOS `sips`.
+`/contactsheet` and `/curate` run `npm install` once in their own folder (Node 20+; sharp, and pdf-lib for the PDFs). `/index` and the legacy `/scan` use Node 20+ with no dependencies. Index runs manually and writes its private snapshot store to `~/Documents/Index` by default. HEIC and raw previews use macOS `sips`.
 
 ## skills
 
@@ -46,6 +46,19 @@ the skills are plain `SKILL.md` folders, so other agents that read skills can us
 /contactsheet ~/Pictures/2024/road-trip
 /curate ~/Pictures/2024/studio-visit
 ```
+
+## manual folder indexing
+
+`/index` recursively adds a portable `_INDEX.md` to every ordinary folder. Each note has a small tree, direct-file inventory, child links, and recorded context that stays with it when moved. All common file types are included; the script does not describe unseen document or media contents.
+
+```bash
+node skills/index/scripts/index.mjs run "<archive folder>" --dry-run
+node skills/index/scripts/index.mjs run "<archive folder>"
+node skills/index/scripts/index.mjs find "client name"
+node skills/index/scripts/index.mjs review
+```
+
+The local `~/Documents/Index/INDEX.md` links to dated source snapshots; `index.json` combines recorded sources for offline location searches. Use `--store` to choose another local folder outside Git, and check cloud-sync settings if privacy matters. Disconnected sources remain last-known hints. A duplicate candidate is not permission to delete a copy. After moving folders, refresh the affected roots manually.
 
 ## how /curate works
 

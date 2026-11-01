@@ -1,95 +1,73 @@
 ---
 name: index
-description: Create and maintain portable, searchable folder notes in `_INDEX.md` files. Use when someone wants to index folders or add context that travels with moved folders. Record observable file and folder facts plus human-provided context; do not inspect every image or video to describe its visual contents.
+description: Recursively create portable _INDEX.md folder notes and a local JSON/Markdown location snapshot for files, documents, projects, and media. Use when indexing a folder or drive, refreshing an archive snapshot, or recording context that must travel with moved folders. Manual invocation; no scheduler or uploads.
 ---
 
 # Index
 
-Give each meaningful folder a short, readable `_INDEX.md` that travels with it. The note is both the human-facing description and the machine-searchable metadata. Per-folder notes are the portable source of truth; no database, Obsidian vault, or cloud service is required.
+Index the requested root **recursively**, creating `_INDEX.md` at every ordinary folder level. A root-only overview is not a completed drive index. Cover PDFs, office documents, source files, images, audio, video, and other ordinary files using names, extensions, sizes, and modification dates. Do not visually inspect media or infer document contents from extensions. Ask the user about useful ambiguous context; preserve the answer in the folder's `## Context` section.
 
-Searching does not require this skill: an agent that can read the notes can search them directly. Use this skill to create or refresh notes consistently. The notes are ordinary Markdown, so they can be used by any agent or tool that can access the relevant folders. A local agent can search mounted drives; a remote agent needs the notes or archive made accessible to it.
+The script is `scripts/index.mjs`, relative to this skill. It uses Node 20+ with no dependencies, network access, background service, or schedule. All commands below run only when requested.
 
-Use ordinary filesystem tools to inspect names, types, sizes, and dates. Read existing documentation and metadata files when relevant. Do not open or visually analyze photos, video, or audio to describe their contents; use filenames and folder names as clues, label guesses as unconfirmed, and ask the user when the meaning matters.
+## Run a manual indexing pass
 
-## Create or update an index
-
-1. Identify the requested folder and inspect its immediate contents. If asked to index a whole archive, work through its meaningful subfolders and place an `_INDEX.md` in each one. Skip system folders, application libraries, generated caches, and folders the user has not included in scope. For a large archive, work in bounded roots or batches and report coverage so an incomplete pass is not mistaken for a complete index.
-2. Reuse an existing `_INDEX.md`. Preserve its stable ID, creation date, and user-authored context. Refresh only facts that can be observed from the current folder. Set `index_updated_at` when the note changes; update the inventory measurement date only when you actually recheck those facts.
-3. Ask one concise question when the folder's purpose, place, project, or backup status is unclear and useful. Continue with the known facts; don't turn guesses into confirmed metadata.
-4. Write or update `_INDEX.md` at the folder's top level. The leading underscore makes it easy to spot and sorts it ahead of ordinary filenames in common file browsers.
-5. When asked to search, search `_INDEX.md` files under the roots the user names or that are currently mounted. Search their titles, summaries, keywords, places, projects, and context first; use filenames and paths as additional clues. State which roots were searched so a disconnected drive is not mistaken for an empty result.
-
-## Optional archive snapshot
-
-When the user wants an overview across drives, maintain a dated, metadata-only snapshot in their second brain's archive area. Build it from the `_INDEX.md` files, not by inspecting each media item. This snapshot is a search aid and last-known-location hint; it is not a backup of the media and does not replace the notes beside the folders.
-
-Record `snapshot_created_at` and `snapshot_updated_at` in the snapshot. For each copy, use `last_known_location`, `last_location_verified_at`, and `location_status` (`verified`, `unverified`, `stale`, or `unavailable`). A disconnected drive or old location is unknown, not proof that files are missing. When asked to refresh, search currently mounted roots and compare stable folder IDs. Preserve the previous last-known location with its check date if it cannot be verified; never silently present it as current.
-
-Keep the snapshot plain Markdown and searchable. Do not introduce a database dependency unless the user later asks for one.
-
-Keep each note brief enough to open and understand at a glance. Prefer useful words a person might search for—places, projects, people, dates, subjects, formats, and status. Use the user's wording where possible. Separate confirmed context from filename-based or otherwise inferred context.
-
-## Portable note format
-
-Use Markdown with YAML frontmatter so it reads well in Finder, Obsidian, GitHub, and other agents, while remaining easy to parse later for a CMS. Start from this shape and omit fields that do not apply:
-
-```md
----
-schema: techistack-index/v1
-id: <stable UUID for this folder's collection>
-index_created_at: <YYYY-MM-DD>
-index_updated_at: <YYYY-MM-DD>
-title: <short folder title>
-summary: <one or two factual sentences>
-keywords: [<search terms>]
-content_types: [<video, photo, audio, documents, project files, etc.>]
-date_range: <known range, or unknown>
-people: [<known names, otherwise empty>]
-places: [<confirmed places, otherwise empty>]
-projects: [<known project or client names>]
-credits: [<known creators, licenses, or rights notes>]
-portfolio_status: <unknown | candidate | selected | published | not-portfolio>
-inventory:
-  media_files: <count, excluding this note and OS metadata files>
-  folders: <count>
-  size_bytes: <total, when practical>
-  measured_at: <YYYY-MM-DD>
-context_source: <user | folder-names | filenames | mixed>
-backup_status: <unknown | not-checked | candidate | verified>
----
-
-# <Short folder title>
-
-## What's here
-<Plain-language description and useful subfolder or file groups.>
-
-## Context
-<Confirmed project, place, date, people, or intended use. Mark any inference.>
-
-## Copies and backup
-<Only list copies that have actually been found. Say when a match is unverified.>
-
-## Notes
-<Handling, relationships, or workflow details that help the next person or agent.>
+```bash
+node <skill>/scripts/index.mjs run "<folder>" --dry-run
+node <skill>/scripts/index.mjs run "<folder>"
 ```
 
-The stable `id` identifies the collection when the folder is moved or copied; keep it when updating the same collection. A copied folder keeps the same ID until the user says it is a separate collection. `index_created_at` stays fixed; `index_updated_at` changes when the note changes; `inventory.measured_at` changes only when inventory facts are rechecked. Do not store an absolute path as identity: paths change when folders move. Current and last-known locations belong in the brain snapshot, with the date each location was checked.
+The default local snapshot store is `~/Documents/Index`. Override with `--store "<local folder>"`; use `--label "<human source name>"` to distinguish a source. Confirm the store choice before first use when privacy or cloud syncing matters: a folder under Documents can be cloud-synced even though the script itself never uploads anything. The store must be outside Git working trees. Do not publish personal notes or snapshots.
 
-When a folder moves, its `_INDEX.md` moves with it and remains valid as context. Update any central snapshot's last-known location only after verifying the new location; preserve the prior location and its verification date if the collection cannot be found. Use stable IDs to recognize copies across roots. Do not claim two folders are backups based only on matching names, dates, or sizes.
+1. Confirm the root and the scope. A selected drive includes its nested folders, not only its immediate children. Start with a dry run to see coverage and errors.
+2. Record confirmed descriptions in each relevant folder's `## Context` section. Example: a `Catalog` folder under `Bicycles` is a bicycle catalog only if confirmed or explicitly marked as inferred. Root context applies to all descendants, so put specific context in the narrowest correct folder.
+3. Run the indexer. It preserves stable folder IDs and prose outside its marked generated block. It adds a tree before the editable Context section in new notes, direct file inventory, child-note links, and portable context. Existing notes retain their layout and get a managed section appended or refreshed. Existing v1 frontmatter inventory stays historical; the managed section and local JSON contain the newly measured facts and their date.
+4. Review the generated overview and errors. Report full recursion separately from overview display depth. Trees are shortened for readability; the JSON holds all included folders and direct files. `complete-with-exclusions` means every traversable in-scope folder was read, subject to listed exclusions—not every byte on a drive. Errors make coverage `partial`.
+5. If you add or correct human context after the pass, run again to refresh child context and snapshots. Keep scripts deterministic about facts; the agent supplies interpretation and user-confirmed meaning.
 
-Use `backup_status: verified` only after comparing the relevant copies. A matching name or size alone is a candidate, not proof. Never move or delete originals as part of indexing. Keep personal `_INDEX.md` files beside the user's files; publish reusable skill code and blank templates, never personal indexes or archive paths.
+Hidden entries, dependencies, generated build/output folders, app libraries, symlinks, the local store, and nested Git working trees are excluded and recorded. Leading-underscore user folders such as `_Website`, `_export`, and `_audio` are included. A selected Git working tree is rejected to avoid accidentally committing personal notes; use a plain archive copy for this version. Inspect exclusions when relevant material might be inside them.
 
-For future publishing, keep known names, places, dates, credits, and rights information in separate fields when available. Leave unknown fields empty or mark them unknown; never invent credits, rights, or identities.
+## Two outputs that communicate
 
-Only set `portfolio_status` from the user's instruction or an existing, documented decision. Indexing does not visually judge whether work belongs in a portfolio.
+**Beside the source folders:** `_INDEX.md` is portable context, with stable ID, creation/update dates, the observed original folder hierarchy, inherited recorded context, direct filenames/types/sizes, and child links. Context is copied into each descendant's generated section so a child can make sense after it moves. Only relative links are used inside folder notes. Stable IDs are identity; absolute paths are not.
 
-## Boundaries
+User prose stays outside `<!-- techistack:index:start -->` and `<!-- techistack:index:end -->`. Do not edit the machine carry marker by hand. Edit `## Context` for confirmed meaning and `## Notes` for other user guidance. Keep inferred descriptions labelled. Existing hand-written summaries and keywords can be retained in frontmatter; the agent may search them too.
 
-- This skill organizes and describes folders. It does not create image captions, judge visual quality, make selections, or write publication copy from unseen media.
-- `/curate` remains the separate workflow for opening visual work, choosing pieces, and preparing publication materials.
-- `/scan` is a separate legacy tool for an existing `_scan_…` snapshot: it provides incremental whole-tree counts and change reports, plus keyword search over frames already described by `/curate`. It is not required to create, search, or update `_INDEX.md` notes. For new portable folder context, use `/index`; avoid creating a new `_scan_…` snapshot for the same archive unless the user specifically wants its inventory/change-report features. If retiring an existing Scan archive, preserve its useful counts/change history and curated-frame search needs before removing its files or skill.
-- Use no machine-specific paths, external services, or required packages in the note format.
+**In the local store:**
 
-## Search examples
+```text
+Index/
+  INDEX.md                 readable source list and latest snapshot links
+  index.json               aggregate inventory across all recorded sources
+  snapshots/
+    <source-id>-<time>.md   one dated readable snapshot of a selected root
+    <source-id>-<time>.json matching facts for that pass
+```
 
-Search the mounted or user-specified archive roots for the literal term `Colombia` in `_INDEX.md` files. Report the matching folder and the root or drive where it was found. If one or more drives are not mounted, say that the search covered only the available roots.
+A new pass updates the local overview and JSON while retaining dated snapshots. Sources not scanned remain available as last-known hints. A source is keyed by root folder ID plus observed root location; finding the same root at a new path records another location rather than guessing whether it was moved or copied. Individual folders absent from a rescan are retained as previously recorded/unobserved entries. Prior snapshots preserve earlier file-level observations. This is metadata, not a backup of file contents.
+
+The JSON records schema, timestamps, source IDs, root location, coverage, errors, folder IDs, summaries, carried context, direct file names/types/sizes/dates, changes, and conflicts. It is readable without the script. A same-ID path change means a relocation or copy candidate, not a verified move. Reused folder IDs at several locations indicate possible copies and are reported; never silently merge them or declare backups complete.
+
+## Search and manual moves
+
+```bash
+node <skill>/scripts/index.mjs find "client name" --store "<local folder>"
+node <skill>/scripts/index.mjs review --store "<local folder>"
+```
+
+Searches cover all recorded sources, including disconnected drives. `find` matches all supplied terms against each folder record and its direct files; terms are literal, not semantic. The agent should try user terms, aliases, spelling variants, and existing summaries, then report **all** matching locations with verification dates and coverage. State whether each root was actually checked now; a stored verification date is not live proof. Any agent with file access can also read/search these notes without this skill.
+
+When a folder moves, carry its note with it. Log date, source, destination, and verification in the user's task tool if they have authorized that logging. Refresh the source and destination roots manually. A lone file moved without its folder note will not carry folder context; the next inventory must discover it. No background detection is implied.
+
+## Optional organization and duplicate review
+
+After the pass, offer a review of candidate duplication and organization. Do not treat it as permission to move or delete anything.
+
+`review` reports same-filename/same-size candidates across the recorded sources plus shared-folder-ID conflicts. These are leads only; stale source records may overlap. For an explicitly requested byte comparison, `run --hash` computes SHA-256 for same-size groups within that source. It can take substantial time on large media. Matching hashes prove identical file contents, not that one copy is unnecessary or that a folder backup is complete.
+
+An agent may suggest clearer grouping or consolidation based on recorded context. Present source, proposed destination, reason, comparison evidence, possible broken references (editing projects, code, linked documents), backup intent, and reversal steps. Preserve unknowns. Only execute moves/deletions if the user separately authorizes those concrete changes. This script has no move/delete command.
+
+## Brain entry and publication
+
+The brain can hold a brief, reviewed pointer to the **local** master index plus the scope/date of the latest pass. Keep detailed locations, client names, filenames, and document context local by default. Do not automatically copy inventories into a Git-tracked brain or Linear. When authorized to log progress, record a minimal action summary and local snapshot pointer rather than the full inventory. The reusable skill and synthetic fixtures can be public; personal outputs cannot be bundled into its release.
+
+`/curate` remains the opt-in visual review workflow. Legacy `/scan` retains its existing incremental inventory/curated-frame-search behavior; it is not required for Index's folder notes or local snapshots. Index does not have Scan's incremental performance optimization: it reads folder listings and file metadata afresh on each pass, and never treats that as verified file-content equality.

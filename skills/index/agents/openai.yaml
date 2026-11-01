@@ -1,6 +1,6 @@
 interface:
   display_name: "Index"
-  short_description: "Portable, searchable folder notes"
-  default_prompt: "Use $index to describe this folder in a portable _INDEX.md."
+  short_description: "Recursive folder notes and local snapshots"
+  default_prompt: "Use $index to recursively index this source and refresh my local snapshot."
 policy:
   allow_implicit_invocation: true

@@ -43,7 +43,8 @@ is what other people install.
 ## Testing a change
 
 ```bash
-node test/smoke.mjs   # every command and edge case, on a generated archive
+node test/index.mjs   # portable notes, local snapshots, moves, and search
+node test/smoke.mjs   # creative workflows on a generated archive
 ```
 
 CI runs the same on macOS and Linux. Then look at real output by hand:
