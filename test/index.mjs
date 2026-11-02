@@ -79,17 +79,30 @@ try{
  // Map generated in store, with Home hub, per-source hub, and per-folder notes named after folders
  const mapHub=await fs.readFile(path.join(store,'map','Home.md'),'utf8');assert(/Sources/.test(mapHub));
  const anySourceDir=(await fs.readdir(path.join(store,'map'))).find(n=>n!=='Home.md'&&n.endsWith('.md')===false);
- const anySourceHub=await fs.readFile(path.join(store,'map',`${anySourceDir}.md`),'utf8');assert(/Root:/.test(anySourceHub));
- const rootName=path.basename(root); // Archive root name e.g., 'archive'
- const folderNote=await fs.readFile(path.join(store,'map',anySourceDir,`${path.basename(root)}.md`).replace(/\/archive\.md$/, `/${path.basename(root)}.md`),'utf8').catch(async()=>await fs.readFile(path.join(store,'map',anySourceDir,`${path.basename(root)}.md`),'utf8'));
- assert(/Indexed:/.test(folderNote) && /photos/.test(folderNote));
+ const anySourceHub=await fs.readFile(path.join(store,'map',`${anySourceDir}.md`),'utf8');assert(/Indexed:/.test(anySourceHub));
+ // All wikilinks under map/ resolve to existing files
+ async function collectLinks(dir){
+   const links=[];for(const name of await fs.readdir(dir)){const p=path.join(dir,name);const st=await fs.lstat(p);if(st.isDirectory()){links.push(...await collectLinks(p));}else if(name.endsWith('.md')){const s=await fs.readFile(p,'utf8');for(const m of s.matchAll(/\[\[([^\]|]+)(?:\|[^\]]+)?\]\]/g)){links.push(m[1]);}}}
+   return links;
+ }
+ const mapLinks=await collectLinks(path.join(store,'map'));
+ for(const l of mapLinks){
+   if(!l.startsWith('map/'))continue;
+   const target=l.endsWith('.md')?l:`${l}.md`;
+   await fs.stat(path.join(store,target));
+ }
+ // A per-folder note exists and has an Indexed line
+ const someDir=path.join(store,'map',anySourceDir);
+ const someNote=(await fs.readdir(someDir)).find(n=>n.endsWith('.md'));
+ const folderNote=await fs.readFile(path.join(someDir,someNote),'utf8');
+ assert(/Indexed:/.test(folderNote));
  // Old _INDEX map notes removed on regenerate
  await fs.mkdir(path.join(store,'map','oldsrc'),{recursive:true});await fs.writeFile(path.join(store,'map','oldsrc','_INDEX.md'),'legacy','utf8');
  await run(root,store,{});
  await assert.rejects(fs.readFile(path.join(store,'map','oldsrc','_INDEX.md'),'utf8'));
  // .obsidian graph options set
  const graphPath2=path.join(store,'.obsidian','graph.json');const graphCfg=JSON.parse(await fs.readFile(graphPath2,'utf8'));
- assert(graphCfg.options.hideUnresolved===true && /-path:sources\//.test(graphCfg.search||''));
+ assert(graphCfg.hideUnresolved===true && /-path:sources\//.test(graphCfg.search||''));
  // Consent include a folder; pending list shows items before and shrinks after
  const pendingBefore=JSON.parse(execFileSync(process.execPath,[alias,'privacy','pending','--store',store],{encoding:'utf8'}));
  JSON.parse(execFileSync(process.execPath,[alias,'privacy','consent',root,'Finance','include','--store',store],{encoding:'utf8'}));
@@ -140,7 +153,7 @@ try{
  const app=JSON.parse(await fs.readFile(appPath,'utf8'));
  assert(Array.isArray(app.userIgnoreFilters)&&app.userIgnoreFilters.some(s=>s==='sources/')&&app.userIgnoreFilters.some(s=>s==='migrations/'));
  const graph=JSON.parse(await fs.readFile(graphPath,'utf8'));
- assert(Array.isArray(graph.groups)&&graph.groups.some(g=>g.query==='tag:"type/folder"'));
+ assert(Array.isArray(graph.colorGroups)&&graph.colorGroups.some(g=>g.query==='tag:#type/folder') && graph.hideUnresolved===true);
  // Merge: preserve keys and avoid duplicates
  await fs.writeFile(appPath,JSON.stringify({theme:'moon',userIgnoreFilters:['custom/']},null,2));
  await fs.writeFile(graphPath,JSON.stringify({layout:'force',groups:[{query:'path:topic/',color:'#000'}]},null,2));
@@ -148,7 +161,7 @@ try{
  const app2=JSON.parse(await fs.readFile(appPath,'utf8'));
  assert(app2.theme==='moon'&&app2.userIgnoreFilters.includes('custom/')&&app2.userIgnoreFilters.includes('sources/'));
  const graph2=JSON.parse(await fs.readFile(graphPath,'utf8'));
- assert(graph2.layout==='force'&&graph2.groups.filter(g=>g.query==='path:topic/').length===1&&graph2.groups.some(g=>g.query==='path:place/'));
+ assert(graph2.layout==='force'&&graph2.colorGroups.filter(g=>g.query==='path:topic/').length===1&&graph2.colorGroups.some(g=>g.query==='path:place/'));
  // Changes report written
  const reportsDir=path.join(store,'reports','changes');const reports=(await fs.readdir(reportsDir));assert(reports.length>0);
  console.log('PASS: root-only notes, full recursion, preserved context/IDs, missing locations, per-source chunks, latest+previous retention, migration, cross-chunk search, duplicate review, nested code, symlink/Git protection, dry run, and unchanged source files.');

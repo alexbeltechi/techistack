@@ -318,25 +318,32 @@ async function ensureObsidianConfig(store){
  const mergedIgnores=[...new Set([...existingIgnores,...desiredIgnores])];
  if(mergedIgnores.length)app.userIgnoreFilters=mergedIgnores;
  await fs.writeFile(appPath,json(app),{flag:'w'});
- // graph.json: color groups merge
+ // graph.json: color groups merge (Obsidian schema)
  const graphPath=path.join(dir,'graph.json');let graph={};
  try{const raw=await fs.readFile(graphPath,'utf8');graph=JSON.parse(raw);}catch{}
- const wantGroups=[
-  {query:'tag:"type/source"',color:'#134f5c'},
-  {query:'tag:"type/folder"',color:'#6aa84f'},
-  {query:'tag:"type/system"',color:'#cc0000'},
-  {query:'path:topic/',color:'#3d85c6'},
-  {query:'path:place/',color:'#674ea7'},
-  {query:'path:period/',color:'#e69138'},
-  {query:'path:reports/',color:'#b45f06'},
-  {query:'path:insights/',color:'#38761d'}
+ // Migrate old keys if present
+ if(graph.groups)delete graph.groups;
+ if(graph.options?.hideUnresolved!=null){graph.hideUnresolved=graph.options.hideUnresolved;delete graph.options.hideUnresolved;}
+ if(graph.options&&Object.keys(graph.options).length===0)delete graph.options;
+ const wantColorGroups=[
+  {query:'tag:#type/source',rgb:0x134f5c},
+  {query:'tag:#type/folder',rgb:0x6aa84f},
+  {query:'tag:#type/system',rgb:0xcc0000},
+  {query:'path:topic/',rgb:0x3d85c6},
+  {query:'path:place/',rgb:0x674ea7},
+  {query:'path:period/',rgb:0xe69138},
+  {query:'path:reports/',rgb:0xb45f06},
+  {query:'path:insights/',rgb:0x38761d}
  ];
- const groups=Array.isArray(graph.groups)?graph.groups:[];
- for(const g of wantGroups){if(!groups.some(x=>String(x.query)===g.query))groups.push(g);}
- if(groups.length)graph.groups=groups;
+ const colorGroups=Array.isArray(graph.colorGroups)?graph.colorGroups:[];
+ for(const g of wantColorGroups){
+   if(!colorGroups.some(x=>String(x.query)===g.query)){
+     colorGroups.push({query:g.query,color:{a:1,rgb:g.rgb}});
+   }
+ }
+ if(colorGroups.length)graph.colorGroups=colorGroups;
  // Hide unresolved and exclude raw data from graph search
- graph.options=graph.options||{};
- graph.options.hideUnresolved=true;
+ graph.hideUnresolved=true;
  const baseSearch='-path:migrations/ -path:reviews/ -path:sources/';
  graph.search=typeof graph.search==='string'&&graph.search.trim().length?`${graph.search} ${baseSearch}`:baseSearch;
  await fs.writeFile(graphPath,json(graph),{flag:'w'});
@@ -382,14 +389,10 @@ async function generateMap(store,manifest){
    const label=entry.label||d.label||'Source';
    const labelSafe=safeLabel(label);
    const sourceDir=path.join(base,labelSafe);await fs.mkdir(sourceDir,{recursive:true});
-   hub+=`- [[${labelSafe}]]\n`;
-   // Source hub
-   await fs.writeFile(path.join(base,`${labelSafe}.md`),`---\ntitle: ${JSON.stringify(label)}\ntags: [\"type/source\"]\n---\n\n# ${clean(label)}\n\nRoot: [[${labelSafe}/${clean(rootRow?.name||'Root')}.md]]\n`,{flag:'w'});
-   // Create per-folder notes
-   const byPath=new Map(rows.map(r=>[r.path,r]));
-   const repoRoots=new Set(rows.filter(r=>r.skipped?.some(s=>s.name==='.git')).map(r=>r.path));
-   function insideRepo(p){for(const root of repoRoots)if(p!==root && (p.startsWith(root+'/')))return true;return false;}
-   // Precompute subtree stats for summary and provenance
+   hub+=`- [[map/${labelSafe}|${clean(label)}]]\n`;
+   // Source hub is the root note
+   const rootNotePath=path.join(base,`${labelSafe}.md`);
+   // Summary helpers
    function subtreeFilesFor(pathRel){
      const out=[];for(const r of rows){if(r.path===pathRel||r.path.startsWith(pathRel+'/'))for(const f of r.files)out.push({...f,absPath:path.join(entry.last_known_location||'',r.path==='.'?f.name:path.posix.join(r.path,f.name))});}
      return out;
@@ -405,6 +408,7 @@ async function generateMap(store,manifest){
      if(['.js','.ts','.tsx','.py','.go','.java','.rb','.cs','.cpp','.c','.hpp','.h','.rs','.php','.swift'].includes(e))return 'code';
      return 'other';
    }
+   function human(n){const units=['B','KB','MB','GB','TB'];let i=0;let v=n;while(v>=1024&&i<units.length-1){v/=1024;i++;}return `${v.toFixed(i?1:0)} ${units[i]}`;}
    function summarize(pathRel){
      const files=subtreeFilesFor(pathRel);
      const counts={photo:0,raw:0,video:0,audio:0,document:0,design:0,code:0,other:0};
@@ -413,12 +417,29 @@ async function generateMap(store,manifest){
        counts[classifyExt(f.extension||path.extname(f.name)||'')]++; totalBytes+=f.size_bytes||0;
        const t=new Date(f.modified_at||0).getTime(); if(isFinite(t)){if(earliest==null||t<earliest)earliest=t;if(latest==null||t>latest)latest=t;}
      }
-     function human(n){const units=['B','KB','MB','GB','TB'];let i=0;let v=n;while(v>=1024&&i<units.length-1){v/=1024;i++;}return `${v.toFixed(i?1:0)} ${units[i]}`;}
+     const parts=[];
+     const order=[['photo','photo'],['raw','raw'],['video','video'],['audio','audio'],['document','document'],['design','design'],['code','code']];
+     for(const [k,word] of order){const n=counts[k]; if(n>0)parts.push(`${n} ${word}${n===1?'':'s'}`);}
      const dateFrom=earliest?new Date(earliest).toISOString().slice(0,7):null;
      const dateTo=latest?new Date(latest).toISOString().slice(0,7):null;
-     const summary=`${counts.photo} photos, ${counts.video} videos, ${human(totalBytes)}, ${dateFrom||'unknown'} to ${dateTo||'unknown'} (inferred)`;
+     const summary=`${parts.join(', ')}${parts.length?`, `:''}${human(totalBytes)}${dateFrom?`, ${dateFrom} to ${dateTo} (inferred)`:''}`;
      return {counts,total_bytes:totalBytes,date_from:dateFrom,date_to:dateTo,summary,provenance:{counts_from:'inventory',date_from:'mtime',date_confidence:'inferred'}};
    }
+   {
+     const stats=summarize('.');
+     const tags=['type/source'];
+     const fm='---\n'+[
+       `title: ${JSON.stringify(label)}`,
+       `tags: ${JSON.stringify(tags)}`,
+       `aliases: ${JSON.stringify([label])}`
+     ].join('\n')+'\n---\n\n';
+     const at=entry.snapshot_at||manifest.updated_at||new Date().toISOString();
+     await fs.writeFile(rootNotePath, fm+`# ${clean(label)}\n\n${stats.summary}\n\nIndexed: ${at}\n`,{flag:'w'});
+   }
+   // Create per-folder notes
+   const byPath=new Map(rows.map(r=>[r.path,r]));
+   const repoRoots=new Set(rows.filter(r=>r.skipped?.some(s=>s.name==='.git')).map(r=>r.path));
+   function insideRepo(p){for(const root of repoRoots)if(p!==root && (p.startsWith(root+'/')))return true;return false;}
    for(const r of rows){
      // Only collection/series levels, skip item-level and folders inside repos (except the repo root)
      const hasChildren=r.children&&r.children.length>0;
