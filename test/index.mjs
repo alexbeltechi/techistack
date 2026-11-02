@@ -93,8 +93,9 @@ try{
  }
  // A per-folder note exists and has an Indexed line
  const someDir=path.join(store,'map',anySourceDir);
- const someNote=(await fs.readdir(someDir)).find(n=>n.endsWith('.md'));
- const folderNote=await fs.readFile(path.join(someDir,someNote),'utf8');
+ async function findFirstMd(dir){for(const e of await fs.readdir(dir,{withFileTypes:true})){const p=path.join(dir,e.name);if(e.isFile()&&e.name.endsWith('.md'))return p; if(e.isDirectory()){const q=await findFirstMd(p); if(q) return q;}} return null;}
+ const someNotePath=await findFirstMd(someDir);
+ const folderNote=await fs.readFile(someNotePath,'utf8');
  assert(/Indexed:/.test(folderNote));
  // Old _INDEX map notes removed on regenerate
  await fs.mkdir(path.join(store,'map','oldsrc'),{recursive:true});await fs.writeFile(path.join(store,'map','oldsrc','_INDEX.md'),'legacy','utf8');

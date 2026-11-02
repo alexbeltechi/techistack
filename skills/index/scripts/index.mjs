@@ -436,62 +436,104 @@ async function generateMap(store,manifest){
      const at=entry.snapshot_at||manifest.updated_at||new Date().toISOString();
      await fs.writeFile(rootNotePath, fm+`# ${clean(label)}\n\n${stats.summary}\n\nIndexed: ${at}\n`,{flag:'w'});
    }
-   // Create per-folder notes
-   const byPath=new Map(rows.map(r=>[r.path,r]));
-   const repoRoots=new Set(rows.filter(r=>r.skipped?.some(s=>s.name==='.git')).map(r=>r.path));
-   function insideRepo(p){for(const root of repoRoots)if(p!==root && (p.startsWith(root+'/')))return true;return false;}
-   for(const r of rows){
-     // Only collection/series levels, skip item-level and folders inside repos (except the repo root)
-     const hasChildren=r.children&&r.children.length>0;
-     const level=hasChildren?(r.path==='.'?'collection':'series'):'item';
-     if(level==='item')continue;
-     if(insideRepo(r.path))continue;
-     const dir=path.join(sourceDir, r.path==='.'?'':r.path);await fs.mkdir(dir,{recursive:true});
-     // Note filename is the folder name, disambiguate with source on collisions
-     let noteName=r.path==='.'?(clean(rootRow?.name||label)):clean(r.name||'folder');
-     if(usedNames.has(noteName))noteName=`${noteName} (${label})`;
-     usedNames.add(noteName);
-     const p=path.join(dir,`${noteName}.md`);
-     const parentPath=r.path==='.'?null:path.posix.dirname(r.path);
-     const at=entry.snapshot_at||manifest.updated_at||new Date().toISOString();
-     const stats=summarize(r.path);
-     const front={
-       schema:'techistack-map-index/v1',
-       title:r.name,
-       type:'Collection',
-       level,
-       date:r.date||null,
-       date_confidence:r.date_confidence||null,
-       subject:r.subject||[],
-       place:r.place||[],
-       status:r.status||'raw',
-       tags:['type/folder'],
-       source:label,
-       location:path.join(entry.last_known_location||'(unmounted)', r.path==='.'?'':r.path),
-       files:(r.files||[]).length,
-       counts:stats.counts,
-       size_bytes_total:stats.total_bytes
-     };
-     const childLinks=(r.children||[]).map(name=>`- [[${labelSafe}/${(r.path==='.'?name:r.path+'/'+name).replace(/\\/g,'/')}/${name}.md]]`).join('\n');
-     const topicLinks=(front.subject||[]).map(t=>`[[topic/${t}]]`).join(' ');
-     const placeLinks=(front.place||[]).map(t=>`[[place/${t}]]`).join(' ');
-     const periodLink=front.date?`[[period/${front.date.slice(0,7)}]]`:'';
-     const flagged=(r.sensitivity && r.consent!=='include');
-     let body=`# ${clean(r.name)}\n\n${stats.summary}\n\nIndexed: ${at}\n\n`;
-     if(flagged)body+='This folder is flagged, awaiting consent.\n\n';
-     body+='## Links\n\n';
-     if(parentPath && byPath.has(parentPath))body+=`Parent: [[${labelSafe}/${parentPath}/${path.posix.basename(parentPath)}.md]]\n\n`;
-     if(childLinks)body+=`Children:\n\n${childLinks}\n\n`;
-     const topics=[topicLinks,placeLinks,periodLink].filter(Boolean).join(' ');
-     if(topics)body+=`Topics: ${topics}\n\n`;
-     // Files are never wikilinked
-     if(!flagged){
-       const list=(r.files||[]).slice(0,50).map(f=>`- \`${f.name}\` — ${f.size_bytes} bytes`).join('\n');
-       body+=`## Files\n\n${list || 'No files directly here.'}\n\n`;
-     }
-     const fm='---\n'+Object.entries(front).map(([k,v])=>`${k}: ${JSON.stringify(v)}`).join('\n')+'\n---\n\n';
-     await fs.writeFile(p, fm+body, {flag:'w'});
-   }
+  // Prepare note names with collision disambiguation
+  const pathToNoteName=new Map();
+  const nameCounts=new Map();
+  function topSegment(p){const seg=p.split('/').filter(Boolean)[0]||'';return seg||label;}
+  for(const r of rows){
+    const baseName = r.path==='.' ? label : (r.name||'folder');
+    const key=baseName.toLowerCase();
+    nameCounts.set(key,(nameCounts.get(key)||0)+1);
+  }
+  for(const r of rows){
+    let noteName;
+    if(r.path==='.') noteName=label;
+    else{
+      const baseName=r.name||'folder';
+      if((nameCounts.get(baseName.toLowerCase())||0)>1){
+        noteName=`${baseName} (${topSegment(r.path)})`;
+      }else{
+        noteName=baseName;
+      }
+    }
+    pathToNoteName.set(r.path,noteName);
+  }
+  // Determine system roots and repo roots
+  const byPath=new Map(rows.map(r=>[r.path,r]));
+  const repoRoots=new Set(rows.filter(r=>r.skipped?.some(s=>s.name==='.git')).map(r=>r.path));
+  function insideRepo(p){for(const root of repoRoots)if(p!==root && (p.startsWith(root+'/')))return true;return false;}
+  function isSystemPackageName(name){return /\.(?:lrcat-data|lrdata|photoslibrary|fcpbundle|app)$/i.test(name) || name==='node_modules';}
+  const systemRoots=new Set(rows.filter(r=>isSystemPackageName(r.name)).map(r=>r.path));
+  function underSystem(p){for(const root of systemRoots)if(p===root || p.startsWith(root+'/'))return true;return false;}
+  // Write per-folder notes
+  for(const r of rows){
+    const isRoot=r.path==='.';
+    if(isRoot)continue; // root handled as hub
+    if(underSystem(r.path))continue; // skip app packages entirely
+    if(insideRepo(r.path))continue; // skip internals
+    // Non-empty folders only
+    const filesHereOrBelow=subtreeFilesFor(r.path).length>0;
+    if(!filesHereOrBelow)continue;
+    const hasChildren=r.children&&r.children.length>0;
+    const level=hasChildren?'series':'item';
+    const dir=path.join(sourceDir, r.path==='.'?'':r.path);await fs.mkdir(dir,{recursive:true});
+    let noteName=pathToNoteName.get(r.path);
+    if(usedNames.has(noteName))noteName=`${noteName} (${label})`;
+    noteName=noteName.replace(/[\\/]/g,'-');
+    usedNames.add(noteName);
+    const p=path.join(dir,`${noteName}.md`);
+    const parentPath=r.path==='.'?null:path.posix.dirname(r.path);
+    const at=entry.snapshot_at||manifest.updated_at||new Date().toISOString();
+    const stats=summarize(r.path);
+    const tags=['type/folder']; if(repoRoots.has(r.path))tags.push('type/system');
+    const front={
+      schema:'techistack-map-index/v1',
+      title:r.name,
+      aliases:[r.name],
+      type:'Collection',
+      level,
+      date:r.date||null,
+      date_confidence:r.date_confidence||null,
+      subject:r.subject||[],
+      place:r.place||[],
+      status:r.status||'raw',
+      tags,
+      source:label,
+      location:path.join(entry.last_known_location||'(unmounted)', r.path==='.'?'':r.path),
+      files:(r.files||[]).length,
+      counts:stats.counts,
+      size_bytes_total:stats.total_bytes
+    };
+    function linkFor(pathRel){
+      const targetName=pathToNoteName.get(pathRel);
+      const prefix=`map/${labelSafe}/${pathRel==='.'?'':pathRel+'/'}${targetName}`;
+      return `[[${prefix}|${clean(targetName)}]]`;
+    }
+    const childLinks=(r.children||[]).filter(name=>{
+      const rel=r.path==='.'?name:r.path+'/'+name;
+      return byPath.has(rel) && !underSystem(rel) && !insideRepo(rel) && subtreeFilesFor(rel).length>0;
+    }).map(name=>{
+      const rel=r.path==='.'?name:r.path+'/'+name;
+      return `- ${linkFor(rel)}`;
+    }).join('\n');
+    const topicLinks=(front.subject||[]).map(t=>`[[topic/${t}|${t}]]`).join(' ');
+    const placeLinks=(front.place||[]).map(t=>`[[place/${t}|${t}]]`).join(' ');
+    const periodLink=front.date?`[[period/${front.date.slice(0,7)}|${front.date.slice(0,7)}]]`:'';
+    const flagged=(r.sensitivity && r.consent!=='include');
+    let body=`# ${clean(r.name)}\n\n${stats.summary}\n\nIndexed: ${at}\n\n`;
+    if(flagged)body+='This folder is flagged, awaiting consent.\n\n';
+    body+='## Links\n\n';
+    if(parentPath){body+=`Parent: ${parentPath==='.'?`[[map/${labelSafe}|${clean(label)}]]`:linkFor(parentPath)}\n\n`;}
+    if(childLinks)body+=`Children:\n\n${childLinks}\n\n`;
+    const topics=[topicLinks,placeLinks,periodLink].filter(Boolean).join(' ');
+    if(topics)body+=`Topics: ${topics}\n\n`;
+    if(!flagged){
+      const list=(r.files||[]).slice(0,50).map(f=>`- \`${f.name}\` — ${f.size_bytes} bytes`).join('\n');
+      body+=`## Files\n\n${list || 'No files directly here.'}\n\n`;
+    }
+    const fm='---\n'+Object.entries(front).map(([k,v])=>`${k}: ${JSON.stringify(v)}`).join('\n')+'\n---\n\n';
+    await fs.writeFile(p, fm+body, {flag:'w'});
+  }
  }
  const hubPath=path.join(base,'Home.md');await fs.writeFile(hubPath,hub+'\n',{flag:'w'});
 }
