@@ -69,7 +69,7 @@ Obsidian (optional): when the local store is opened as a vault, `/index` writes 
 - `.obsidian/app.json`: adds `userIgnoreFilters` for raw data folders (`migrations/`, `sources/`, `privacy/`, `snapshots/`, `reviews/`), merged with your existing settings.
 - `.obsidian/graph.json`: sets `hideUnresolved: true`, a `search` that excludes raw data (`-path:migrations/ -path:reviews/ -path:sources/`), and color groups for note types — the generated `map/` (folders/sources), and `topic/`, `place/`, `period/` pages — merged with any existing groups. Files are never wikilinked by `/index`, so the graph stays a readable map of structure and topics.\n\nObsidian is optional and not required to use TechiStack; configs are merged safely and any existing keys are preserved.
 
-Store map (read-only): the local store now contains a generated map under `map/`, one small note per folder per source (`map/<source>/<relative>/_INDEX.md`) with DC frontmatter and wikilinks up/down/across. A `map/README.md` links each source. The map regenerates on every run and works even when drives are unmounted, so your Obsidian vault shows the tree across all drives without touching originals.
+Store map (read-only): the local store now contains a generated map under `map/`, one small note per folder per source (`map/<source>/<relative>/<Folder>.md`) with DC frontmatter (`title`, `type`, `level`, `date`/`date_confidence`, `subject`, `place`, `status`), plus `source`, `location`, counts by type, total size, inferred date range, and provenance. Notes link up/down/across only; files are plain text. `map/Home.md` links each source hub, and `map/<source>.md` is the drive hub. The map regenerates each run and works when drives are unmounted.
 
 ## how /curate works
 
