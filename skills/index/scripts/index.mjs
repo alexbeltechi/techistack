@@ -48,19 +48,21 @@ async function readVocab(store){
  if(!j)return {schema:'techistack-vocabulary/v1',subjects:[],places:[]};
  const norm=list=>Array.isArray(list)?list:list&&typeof list==='object'?Object.entries(list).map(([tag,aliases])=>({tag,aliases:Array.isArray(aliases)?aliases:[]})):[];return {schema:j.schema||'techistack-vocabulary/v1',subjects:norm(j.subjects),places:norm(j.places)};
 }
-async function readSensitivity(store){
- const p=path.join(store,SENSITIVITY_FILE);const j=await readJsonIfExists(p);
- if(j&&j.schema==='techistack-sensitivity/v1')return j;
- // Default, user can extend/override locally
+async function defaultSensitivity(){
  return {schema:'techistack-sensitivity/v1',
   keywords:{
-    financial:['invoice','factura','facturi','chitanta','bon','extras','extrase','extras de cont','declaratie','impozit','anaf','contabilitate','salariu','fluturas','banca','bank','statement'],
-    identity:['cnp','buletin','pasaport','passport','id','acte','act'],
-    medical:['medical','sanatate','analize','reteta'],
-    credentials:['password','parola','kdbx']
+    financial:['invoice','factura','facturi','chitanta','bon','extrase','extras de cont','declaratie','impozit','anaf','contabilitate','salariu','fluturas','banca','bank','statement'],
+    identity:['cnp','buletin','pasaport','passport','acte','act','permis'],
+    medical:['medical','sanatate','analize','bioclinica','synevo','regina maria','medlife','reteta','spital','clinica'],
+    legal:['contract','instrainare','dobandire','notar','proces verbal','procese-verbale']
   },
   banks:['bt','banca transilvania','bcr','brd','ing','raiffeisen','unicredit','cec','revolut','wise','chase','barclays','hsbc','lloyds','natwest','santander','citibank','citi','bofa','boa']
  };
+}
+async function readSensitivity(store){
+ const p=path.join(store,SENSITIVITY_FILE);const j=await readJsonIfExists(p);
+ if(j&&j.schema==='techistack-sensitivity/v1')return j;
+ return await defaultSensitivity();
 }
 async function readConsents(store){const p=path.join(store,CONSENTS_FILE);const j=await readJsonIfExists(p);return j&&j.schema==='techistack-privacy-consents/v1'?j:{schema:'techistack-privacy-consents/v1',consents:{}};}
 async function writeConsents(store,data){const p=path.join(store,CONSENTS_FILE);await fs.mkdir(path.dirname(p),{recursive:true});await fs.writeFile(p,json(data),{flag:'w'});}
@@ -78,6 +80,26 @@ function hasIbanLike(name){
 function luhnValid(digits){const s=digits.replace(/[^\d]/g,'');if(s.length<13||s.length>19)return false;let sum=0;let alt=false;for(let i=s.length-1;i>=0;i--){let n=s.charCodeAt(i)-48;if(alt){n*=2;if(n>9)n-=9;}sum+=n;alt=!alt;}return sum%10===0;}
 function isCNP(s){const m=s.match(/\b\d{13}\b/);if(!m)return false;const c=m[0];const w='279146358279'.split('').map(x=>+x);let sum=0;for(let i=0;i<12;i++)sum+=(+c[i])*w[i];let k=sum%11;if(k===10)k=1;return k===+c[12];}
 function redactFilename(name){const ext=path.extname(name);return {name:`REDACTED${ext}`,redacted:true,reason:'sensitive-number-in-name'};}
+// Tokenization: split on non-letters and camelCase, keep Romanian diacritics
+function tokenize(s){
+ const spaced=s.replace(/([a-zăâîșț])([A-ZĂÂÎȘȚ])/g,'$1 $2');
+ return spaced.toLowerCase().split(/[^a-zăâîșț0-9]+/i).filter(Boolean);
+}
+function hasToken(tokens, term){
+ const parts=tokenize(term);
+ if(parts.length===1)return tokens.includes(parts[0]);
+ // all tokens present
+ return parts.every(p=>tokens.includes(p));
+}
+function detectCategory(tokens, lex){
+ if((lex.banks||[]).some(b=>hasToken(tokens,b)))return 'financial';
+ if((lex.keywords?.financial||[]).some(t=>hasToken(tokens,t)))return 'financial';
+ if((lex.keywords?.medical||[]).some(t=>hasToken(tokens,t)))return 'medical';
+ if((lex.keywords?.identity||[]).some(t=>hasToken(tokens,t)))return 'identity';
+ if((lex.keywords?.legal||[]).some(t=>hasToken(tokens,t)))return 'legal';
+ if((lex.keywords?.credentials||[]).some(t=>hasToken(tokens,t)))return 'credentials';
+ return null;
+}
 function recognizeBankStatement(name,lex){
  const base=path.basename(name).toLowerCase();
  const bank=(lex.banks||[]).find(b=>base.includes(b.toLowerCase()));
@@ -239,9 +261,27 @@ async function writeSource(store,source,rows,previous=null){
  const refs=[];let batch=[],size=0;
  async function flush(){if(!batch.length)return;refs.push(await immutable(store,'sources/'+source.source_id+'/chunks',{schema:CHUNK,source_id:source.source_id,folders:batch}));batch=[];size=0;}
  const parents=new Map(rows.map(r=>[r.path,r.id]));
+ // Build subtree file lists for signatures (observed only)
+ const observedRows=rows.filter(r=>!r.location_status?.startsWith('not-observed'));
+ const byPath=new Map(observedRows.map(r=>[r.path,r]));
+ function subtreeFiles(rootPath){
+   const out=[];
+   for(const r of observedRows){
+     if(r.path===rootPath || r.path.startsWith(rootPath+'/')){
+       const base=r.path===rootPath?'.':r.path.slice(rootPath.length+1);
+       for(const f of r.files){
+         out.push([path.posix.join(base,f.name),f.size_bytes||0,f.sha256||null]);
+       }
+     }
+   }
+   out.sort((a,b)=>a[0].localeCompare(b[0])||a[1]-b[1]);
+   return out;
+ }
  for(const raw of rows){
   const r={...raw,kind:'folder',parent_id:raw.parent_id??(raw.path==='.'?null:parents.get(path.posix.dirname(raw.path))??null)};
-  const sigInput=r.files.map(f=>[f.size_bytes||0,f.sha256||null]);r.signature={method:'file-sizes-hashes/v1',sha256:sha(JSON.stringify(sigInput))};
+  // Recursive signature; omit for empty
+  const sigInput=subtreeFiles(r.path);
+  if(sigInput.length>0)r.signature={method:'subtree-file-list/v1',sha256:sha(JSON.stringify(sigInput))};
   const n=Math.max(1,Math.ceil(r.files.length/FILES_PER_PART));for(let i=0;i<n;i++){
    const part={...r,files:r.files.slice(i*FILES_PER_PART,(i+1)*FILES_PER_PART),file_part:i,file_parts:n};
    const bytes=Buffer.byteLength(json(part));if(batch.length&&size+bytes>CHUNK_BYTES)await flush();batch.push(part);size+=bytes;
@@ -267,6 +307,9 @@ async function prune(store,entry){
 // --- Obsidian minimal config: merge-only helper ---
 async function ensureObsidianConfig(store){
  const dir=path.join(store,'.obsidian');await fs.mkdir(dir,{recursive:true});
+ // ensure sensitivity.json exists
+ const sensPath=path.join(store,SENSITIVITY_FILE);
+ if(!await exists(sensPath)){await fs.writeFile(sensPath,json(await defaultSensitivity()),{flag:'wx'}).catch(()=>{});}
  // app.json: userIgnoreFilters merge
  const appPath=path.join(dir,'app.json');let app={};
  try{const raw=await fs.readFile(appPath,'utf8');app=JSON.parse(raw);}catch{}
@@ -279,10 +322,14 @@ async function ensureObsidianConfig(store){
  const graphPath=path.join(dir,'graph.json');let graph={};
  try{const raw=await fs.readFile(graphPath,'utf8');graph=JSON.parse(raw);}catch{}
  const wantGroups=[
-  {query:'path:map/',color:'#6aa84f'},
+  {query:'tag:"type/source"',color:'#134f5c'},
+  {query:'tag:"type/folder"',color:'#6aa84f'},
+  {query:'tag:"type/system"',color:'#cc0000'},
   {query:'path:topic/',color:'#3d85c6'},
   {query:'path:place/',color:'#674ea7'},
-  {query:'path:period/',color:'#e69138'}
+  {query:'path:period/',color:'#e69138'},
+  {query:'path:reports/',color:'#b45f06'},
+  {query:'path:insights/',color:'#38761d'}
  ];
  const groups=Array.isArray(graph.groups)?graph.groups:[];
  for(const g of wantGroups){if(!groups.some(x=>String(x.query)===g.query))groups.push(g);}
@@ -326,7 +373,8 @@ function safeLabel(label){return String(label||'source').toLowerCase().replace(/
 async function generateMap(store,manifest){
  // Rebuild the map completely
  const base=path.join(store,'map');await fs.rm(base,{recursive:true,force:true});await fs.mkdir(base,{recursive:true});
- let hub='# Indexed sources\n\n';
+ let hub='# Home\n\nSources:\n\n';
+ const usedNames=new Set();
  for(const entry of manifest.sources){
    const d=await descriptor(store,entry);
    const rows=await loadFolders(store,entry);
@@ -334,36 +382,84 @@ async function generateMap(store,manifest){
    const label=entry.label||d.label||'Source';
    const labelSafe=safeLabel(label);
    const sourceDir=path.join(base,labelSafe);await fs.mkdir(sourceDir,{recursive:true});
-   hub+=`- [[map/${labelSafe}/_INDEX]] (${label})\n`;
+   hub+=`- [[${labelSafe}]]\n`;
+   // Source hub
+   await fs.writeFile(path.join(base,`${labelSafe}.md`),`---\ntitle: ${JSON.stringify(label)}\ntags: [\"type/source\"]\n---\n\n# ${clean(label)}\n\nRoot: [[${labelSafe}/${clean(rootRow?.name||'Root')}.md]]\n`,{flag:'w'});
    // Create per-folder notes
    const byPath=new Map(rows.map(r=>[r.path,r]));
+   const repoRoots=new Set(rows.filter(r=>r.skipped?.some(s=>s.name==='.git')).map(r=>r.path));
+   function insideRepo(p){for(const root of repoRoots)if(p!==root && (p.startsWith(root+'/')))return true;return false;}
+   // Precompute subtree stats for summary and provenance
+   function subtreeFilesFor(pathRel){
+     const out=[];for(const r of rows){if(r.path===pathRel||r.path.startsWith(pathRel+'/'))for(const f of r.files)out.push({...f,absPath:path.join(entry.last_known_location||'',r.path==='.'?f.name:path.posix.join(r.path,f.name))});}
+     return out;
+   }
+   function classifyExt(ext){
+     const e=ext.toLowerCase();
+     if(['.jpg','.jpeg','.png','.gif','.webp','.tif','.tiff','.heic','.bmp'].includes(e))return 'photo';
+     if(['.nef','.cr2','.cr3','.arw','.rw2','.dng','.raf','.orf'].includes(e))return 'raw';
+     if(['.mov','.mp4','.avi','.mkv','.m4v','.wmv','.webm'].includes(e))return 'video';
+     if(['.mp3','.wav','.flac','.aac','.m4a','.ogg'].includes(e))return 'audio';
+     if(['.pdf','.doc','.docx','.xls','.xlsx','.ppt','.pptx','.pages','.numbers','.key','.txt','.md'].includes(e))return 'document';
+     if(['.psd','.ai','.sketch','.fig','.xd','.indd'].includes(e))return 'design';
+     if(['.js','.ts','.tsx','.py','.go','.java','.rb','.cs','.cpp','.c','.hpp','.h','.rs','.php','.swift'].includes(e))return 'code';
+     return 'other';
+   }
+   function summarize(pathRel){
+     const files=subtreeFilesFor(pathRel);
+     const counts={photo:0,raw:0,video:0,audio:0,document:0,design:0,code:0,other:0};
+     let totalBytes=0;let earliest=null, latest=null;
+     for(const f of files){
+       counts[classifyExt(f.extension||path.extname(f.name)||'')]++; totalBytes+=f.size_bytes||0;
+       const t=new Date(f.modified_at||0).getTime(); if(isFinite(t)){if(earliest==null||t<earliest)earliest=t;if(latest==null||t>latest)latest=t;}
+     }
+     function human(n){const units=['B','KB','MB','GB','TB'];let i=0;let v=n;while(v>=1024&&i<units.length-1){v/=1024;i++;}return `${v.toFixed(i?1:0)} ${units[i]}`;}
+     const dateFrom=earliest?new Date(earliest).toISOString().slice(0,7):null;
+     const dateTo=latest?new Date(latest).toISOString().slice(0,7):null;
+     const summary=`${counts.photo} photos, ${counts.video} videos, ${human(totalBytes)}, ${dateFrom||'unknown'} to ${dateTo||'unknown'} (inferred)`;
+     return {counts,total_bytes:totalBytes,date_from:dateFrom,date_to:dateTo,summary,provenance:{counts_from:'inventory',date_from:'mtime',date_confidence:'inferred'}};
+   }
    for(const r of rows){
+     // Only collection/series levels, skip item-level and folders inside repos (except the repo root)
+     const hasChildren=r.children&&r.children.length>0;
+     const level=hasChildren?(r.path==='.'?'collection':'series'):'item';
+     if(level==='item')continue;
+     if(insideRepo(r.path))continue;
      const dir=path.join(sourceDir, r.path==='.'?'':r.path);await fs.mkdir(dir,{recursive:true});
-     const p=path.join(dir,'_INDEX.md');
+     // Note filename is the folder name, disambiguate with source on collisions
+     let noteName=r.path==='.'?(clean(rootRow?.name||label)):clean(r.name||'folder');
+     if(usedNames.has(noteName))noteName=`${noteName} (${label})`;
+     usedNames.add(noteName);
+     const p=path.join(dir,`${noteName}.md`);
      const parentPath=r.path==='.'?null:path.posix.dirname(r.path);
      const at=entry.snapshot_at||manifest.updated_at||new Date().toISOString();
+     const stats=summarize(r.path);
      const front={
        schema:'techistack-map-index/v1',
        title:r.name,
        type:'Collection',
+       level,
        date:r.date||null,
        date_confidence:r.date_confidence||null,
        subject:r.subject||[],
        place:r.place||[],
        status:r.status||'raw',
+       tags:['type/folder'],
        source:label,
        location:path.join(entry.last_known_location||'(unmounted)', r.path==='.'?'':r.path),
-       files:(r.files||[]).length
+       files:(r.files||[]).length,
+       counts:stats.counts,
+       size_bytes_total:stats.total_bytes
      };
-     const childLinks=(r.children||[]).map(name=>`- [[${(r.path==='.'?name:r.path+'/'+name).replace(/\\/g,'/')}/_INDEX]]`).join('\n');
+     const childLinks=(r.children||[]).map(name=>`- [[${labelSafe}/${(r.path==='.'?name:r.path+'/'+name).replace(/\\/g,'/')}/${name}.md]]`).join('\n');
      const topicLinks=(front.subject||[]).map(t=>`[[topic/${t}]]`).join(' ');
      const placeLinks=(front.place||[]).map(t=>`[[place/${t}]]`).join(' ');
      const periodLink=front.date?`[[period/${front.date.slice(0,7)}]]`:'';
      const flagged=(r.sensitivity && r.consent!=='include');
-     let body=`# ${clean(r.name)}\n\nIndexed: ${at}\n\n`;
+     let body=`# ${clean(r.name)}\n\n${stats.summary}\n\nIndexed: ${at}\n\n`;
      if(flagged)body+='This folder is flagged, awaiting consent.\n\n';
      body+='## Links\n\n';
-     if(parentPath && byPath.has(parentPath))body+=`Parent: [[${parentPath}/_INDEX]]\n\n`;
+     if(parentPath && byPath.has(parentPath))body+=`Parent: [[${labelSafe}/${parentPath}/${path.posix.basename(parentPath)}.md]]\n\n`;
      if(childLinks)body+=`Children:\n\n${childLinks}\n\n`;
      const topics=[topicLinks,placeLinks,periodLink].filter(Boolean).join(' ');
      if(topics)body+=`Topics: ${topics}\n\n`;
@@ -376,7 +472,7 @@ async function generateMap(store,manifest){
      await fs.writeFile(p, fm+body, {flag:'w'});
    }
  }
- const hubPath=path.join(base,'README.md');await fs.writeFile(hubPath,hub+'\n',{flag:'w'});
+ const hubPath=path.join(base,'Home.md');await fs.writeFile(hubPath,hub+'\n',{flag:'w'});
 }
 async function run(rootArg,storeArg,{dryRun=false,hash=false,label}={}){
  const root=await fs.realpath(rootArg);let store=path.resolve(storeArg),ancestor=store,tail=[];
@@ -414,11 +510,10 @@ async function run(rootArg,storeArg,{dryRun=false,hash=false,label}={}){
   rec.status=field(legacy,'status')||old?.status||'raw';
   const dateGuess=inferDateFromNames(path.basename(abs),[]);
   if(dateGuess){rec.date=dateGuess.date;rec.date_confidence=dateGuess.confidence;}
-  // Folder sensitivity from name keywords
-  const folderName=path.basename(abs).toLowerCase().replace(/[-_]/g,' ');
-  const sensKw=sensitivityLex.keywords||{};
-  const isFinancial=(sensKw.financial||[]).some(k=>folderName.includes(k.toLowerCase()))||(sensitivityLex.banks||[]).some(b=>folderName.includes(b.toLowerCase()));
-  if(isFinancial){rec.sensitivity='financial';rec.consent=(consentMap.get(rel||'.')||'pending');}
+  // Folder sensitivity by tokens and banks (whole tokens only)
+  const folderTokens=tokenize(path.basename(abs));
+  const cat=detectCategory(folderTokens,sensitivityLex);
+  if(cat){rec.sensitivity=cat;rec.consent=(consentMap.get(rel||'.')||'pending');}
   folders.push(rec);
   for(const ent of entries){if(ent.name==='_INDEX.md')continue;const dest=path.join(abs,ent.name);
    if(ent.name.startsWith('.')||SKIP.has(ent.name)||generated.test(ent.name)||/\.(?:app|photoslibrary|lrdata|lrlibrary)$/i.test(ent.name)||inside(dest,store)){rec.skipped.push({name:ent.name,reason:'system, dependency, generated output, package, or local store'});continue;}
@@ -442,8 +537,9 @@ async function run(rootArg,storeArg,{dryRun=false,hash=false,label}={}){
        else if(nameHasCnp)fileRec.sensitivity='identity';
        else if(isCredFile)fileRec.sensitivity='credentials';
        else {
-         const nm=ent.name.toLowerCase();
-         if((sensKw.financial||[]).some(k=>nm.includes(k.toLowerCase()))||(sensitivityLex.banks||[]).some(b=>nm.includes(b.toLowerCase())))fileRec.sensitivity='financial';
+         const tokens=tokenize(ent.name);
+         const cat=detectCategory(tokens,sensitivityLex);
+         if(cat)fileRec.sensitivity=cat;
        }
        if(fileRec.sensitivity)fileRec.consent=(consentMap.get((rel==='.'?'':rel+'/')+ent.name)||consentMap.get(rel||'.')||'pending');
        // Structured facts from name
@@ -483,6 +579,13 @@ async function run(rootArg,storeArg,{dryRun=false,hash=false,label}={}){
   await atomic(path.join(store,'index.json'),json(manifest));
   await ensureObsidianConfig(store);
   await generateMap(store,manifest);
+  // Changes report
+  const reportDir=path.join(store,'reports','changes');await fs.mkdir(reportDir,{recursive:true});
+  const labelOut=(label||mountLabel(root)+' / '+path.basename(root)).replace(/[^\w.-]+/g,'-');
+  const reportPath=path.join(reportDir,`${at.slice(0,10)}-${labelOut}.md`);
+  const added=folders.filter(r=>!previous.some(p=>p.path===r.path)).map(r=>r.path);
+  const removed=previous.filter(p=>!folders.some(r=>r.path===p.path)).map(r=>r.path);
+  await fs.writeFile(reportPath,`# Changes ${at.slice(0,10)} — ${label||mountLabel(root)+' / '+path.basename(root)}\n\n- Folders added: ${added.length}\n- Folders removed: ${removed.length}\n`,{flag:'w'});
   await prune(store,entry);
   if(!await exists(path.join(store,'.gitignore')))await fs.writeFile(path.join(store,'.gitignore'),'*\n',{flag:'wx'});
   summary.coverage=source.coverage;summary.latest=refPath(store,entry.latest);summary.previous=entry.previous?refPath(store,entry.previous):null;
@@ -508,7 +611,19 @@ async function review(store){
  // Folder-signature matches (potential moves or duplicates across sources)
  const bySig=new Map();
  for(const s of sources)for(const r of s.folders){const k=r.signature?.sha256; if(!k)continue; const row={source:s.label,source_id:s.source_id,path:path.join(s.last_known_location,r.path),folder_id:r.id,signature:k}; if(!bySig.has(k))bySig.set(k,[]); bySig.get(k).push(row);}
- const identical_folders=[...bySig.values()].filter(g=>g.length>1);
+ const identical_folders=[...bySig.values()].filter(g=>g.length>1).map(g=>{
+   // exclude parent/child within same source label if paths nested
+   const filtered=[];
+   for(const a of g){
+     let nested=false;
+     for(const b of g){
+       if(a===b)continue;
+       if(a.path.startsWith(b.path+'/')||b.path.startsWith(a.path+'/')){nested=true;break;}
+     }
+     if(!nested)filtered.push(a);
+   }
+   return filtered;
+ }).filter(g=>g.length>1);
  // Signature conflicts: same relative path seen with different signatures across sources
  const byRel=new Map();
  for(const s of sources)for(const r of s.folders){const k=r.path;const v={source:s.label,signature:r.signature?.sha256||null,path:path.join(s.last_known_location,r.path)};if(!byRel.has(k))byRel.set(k,[]);byRel.get(k).push(v);}
@@ -519,7 +634,25 @@ async function review(store){
    if(r.sensitivity && r.consent!=='include')flagged_pending.push({path:path.join(s.last_known_location,r.path),kind:'folder',sensitivity:r.sensitivity});
    for(const f of r.files)if(f.sensitivity && f.consent!=='include')flagged_pending.push({path:path.join(s.last_known_location,r.path,f.name),kind:'file',sensitivity:f.sensitivity});
  }
- return {candidate_duplicates:candidates(sources),identical_content:hashMatches(sources),identical_folders,signature_conflicts,flagged_pending,conflicts:sources.flatMap(s=>(s.conflicts||[]).map(c=>({source:s.label,...c}))),note:'Candidates only; verify live locations, dependencies, and backup intent before proposing changes.'};
+ // Folder similarity roll-up
+ const keyToFolders=new Map(); // name+size -> set of folder refs
+ for(const s of sources)for(const r of s.folders)for(const f of r.files){
+   const k=(f.name.toLowerCase()+'\0'+(f.size_bytes||0)); if(!keyToFolders.has(k))keyToFolders.set(k,new Map());
+   const m=keyToFolders.get(k);const id=s.source_id+':'+r.id+':'+r.path; if(!m.has(id))m.set(id,{source:s.label,source_id:s.source_id,path:path.join(s.last_known_location,r.path),count:0}); m.get(id).count++;
+ }
+ const pairCounts=new Map();
+ function pairKey(a,b){return a<b?a+'|'+b:b+'|'+a;}
+ for(const folders of keyToFolders.values()){
+   const arr=[...folders.values()];
+   for(let i=0;i<arr.length;i++)for(let j=i+1;j<arr.length;j++){
+     if(arr[i].source_id===arr[j].source_id)continue;
+     const pk=pairKey(arr[i].path,arr[j].path);
+     const v=pairCounts.get(pk)||{a:arr[i],b:arr[j],matches:0};
+     v.matches++;pairCounts.set(pk,v);
+   }
+ }
+ const folder_similarity=[...pairCounts.values()].sort((a,b)=>b.matches-a.matches).slice(0,200);
+ return {candidate_duplicates:candidates(sources),identical_content:hashMatches(sources),identical_folders,folder_similarity,signature_conflicts,flagged_pending,conflicts:sources.flatMap(s=>(s.conflicts||[]).map(c=>({source:s.label,...c}))),note:'Candidates only; verify live locations, dependencies, and backup intent before proposing changes.'};
 }
 export {run,readStore,loadFolders,find,review,writeSource};
 async function main(){
