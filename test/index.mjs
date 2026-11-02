@@ -53,5 +53,20 @@ try{
  const alias=path.join(tmp,'alias.mjs');await fs.symlink(cli,alias);assert(JSON.parse(execFileSync(process.execPath,[alias,'find','document','--store',store],{encoding:'utf8'})).matches.length);
  assert(JSON.parse(execFileSync(process.execPath,[alias,'find','document'],{encoding:'utf8',env:{...process.env,TECHISTACK_INDEX_STORE:store}})).matches.length);
  assert(JSON.parse(execFileSync(process.execPath,[alias,'find','document','--store',store],{encoding:'utf8',env:{...process.env,TECHISTACK_INDEX_STORE:path.join(tmp,'empty-store')}})).matches.length);
+ // Privacy: sensitive filenames redacted; sensitive folders require approval
+ await fs.writeFile(path.join(root,'2026-01 Monzo Statement IBAN GB12 BARC 1234 5678 9012.pdf'),'x');
+ await fs.mkdir(path.join(root,'Finance','Bank'),{recursive:true});await fs.writeFile(path.join(root,'Finance','Bank','passwords.txt'),'x');
+ await run(root,store,{});
+ db=await readStore(store);rows=await loadFolders(store,db.sources.find(s=>s.last_known_location===root));
+ const rootRow=rows.find(r=>r.path==='.');assert(rootRow.files.some(f=>f.name.startsWith('REDACTED')&&f.observed_as&&f.observed_as.kind==='bank_statement'));
+ const rootRow2=rows.find(r=>r.path==='.');assert(rootRow2&&rootRow2.skipped.some(s=>s.name==='Finance'&&/privacy-sensitive/.test(s.reason)));
+ // Approve sensitive folder; it gets traversed next run
+ JSON.parse(execFileSync(process.execPath,[alias,'privacy','approve',root,'Finance','--store',store],{encoding:'utf8'}));
+ JSON.parse(execFileSync(process.execPath,[alias,'privacy','approve',root,'Finance/Bank','--store',store],{encoding:'utf8'}));
+ await run(root,store,{});db=await readStore(store);rows=await loadFolders(store,db.sources.find(s=>s.last_known_location===root));
+ const bank=rows.find(r=>r.path==='Finance/Bank');assert(bank);
+ // Move/identity heuristics: identical folder signatures across sources are reported
+ const moved=path.join(tmp,'moved-root');await fs.mkdir(path.join(moved,'Cabin'),{recursive:true});await fs.writeFile(path.join(moved,'Cabin','manual.pdf'),'fake PDF fixture');await run(moved,store,{});
+ const rev2=await review(store);assert(rev2.identical_folders.some(g=>g.length>=2));
  console.log('PASS: root-only notes, full recursion, preserved context/IDs, missing locations, per-source chunks, latest+previous retention, migration, cross-chunk search, duplicate review, nested code, symlink/Git protection, dry run, and unchanged source files.');
 }finally{await fs.rm(tmp,{recursive:true,force:true});}

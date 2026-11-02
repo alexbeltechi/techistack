@@ -37,6 +37,55 @@ function metadata(note,values){
 function mountLabel(root){const parts=root.split(path.sep);return parts[1]==='Volumes'?parts[2]:os.hostname();}
 function fileSummary(files){const c={};for(const f of files)c[f.extension||'(no extension)']=(c[f.extension||'(no extension)']||0)+1;return Object.entries(c).map(([x,n])=>`${n} ${x}`).join(', ')||'No files directly here';}
 function tree(rec,byPath,depth=2,limit=80){const lines=[rec.name+'/'];let clipped=false;function visit(r,prefix,d){if(d>=depth){if(r.children.length)lines.push(prefix+'└── … deeper folders; use the links below');return;}r.children.forEach((name,i)=>{if(lines.length>=limit){clipped=true;return;}const last=i===r.children.length-1;lines.push(prefix+(last?'└── ':'├── ')+clean(name)+'/');const child=byPath.get(r.path==='.'?name:r.path+'/'+name);if(child)visit(child,prefix+(last?'    ':'│   '),d+1);});}visit(rec,'',0);if(clipped)lines.push('… overview shortened; full directory is in the local snapshot');return lines.join('\n');}
+
+// Controlled vocabulary and privacy helpers
+const VOCAB_FILE='vocab.json'; // store-relative
+const PRIVACY_APPROVALS_FILE=path.join('privacy','approvals.json'); // { schema, approvals: { [source_id]: [relative paths] } }
+async function readJsonIfExists(p){const raw=await text(p);return raw?JSON.parse(raw):null;}
+async function readVocab(store){
+ const p=path.join(store,VOCAB_FILE);const j=await readJsonIfExists(p);
+ if(!j)return {schema:'techistack-vocabulary/v1',subjects:[],places:[]};
+ const norm=list=>Array.isArray(list)?list:list&&typeof list==='object'?Object.entries(list).map(([tag,aliases])=>({tag,aliases:Array.isArray(aliases)?aliases:[]})):[];return {schema:j.schema||'techistack-vocabulary/v1',subjects:norm(j.subjects),places:norm(j.places)};
+}
+async function readPrivacyApprovals(store){const p=path.join(store,PRIVACY_APPROVALS_FILE);const j=await readJsonIfExists(p);return j&&j.schema==='techistack-privacy-approvals/v1'?j:{schema:'techistack-privacy-approvals/v1',approvals:{}};}
+async function writePrivacyApprovals(store,data){const p=path.join(store,PRIVACY_APPROVALS_FILE);await fs.mkdir(path.dirname(p),{recursive:true});await fs.writeFile(p,json(data),{flag:'w'});}
+function tagsFromVocab(vocab,words){
+ const out={subject:[],place:[]};
+ for(const {tag,aliases=[]} of vocab.subjects){const all=[tag,...aliases].map(x=>x.toLowerCase());if(words.some(w=>all.includes(w)))out.subject.push(tag);}
+ for(const {tag,aliases=[]} of vocab.places){const all=[tag,...aliases].map(x=>x.toLowerCase());if(words.some(w=>all.includes(w)))out.place.push(tag);}
+ out.subject=[...new Set(out.subject)].sort();out.place=[...new Set(out.place)].sort();return out;
+}
+const SENSITIVE_FOLDER_WORDS=['finance','bank','statement','statements','tax','medical','health','id','ids','identity','password','passwords','contracts','legal','payroll'];
+function looksSensitiveFolder(name){const w=name.toLowerCase().replace(/[-_]/g,' ');return SENSITIVE_FOLDER_WORDS.some(x=>w.split(/\s+/).includes(x));}
+const RE_CARD=/\b(?:\d[ -]*?){13,19}\b/; // loose
+const RE_IBAN=/\b[A-Z]{2}\d{2}[A-Z0-9]{10,30}\b/;
+const RE_ACCOUNT_HINTS=/\b(iban|sort\s*code|account\s*no?\.?|card|cc)\b/i;
+const RE_PASSWORD_HINTS=/\b(pass(word|code)?|login|secret)\b/i;
+const RE_ID_HINTS=/\b(ssn|ein|nid|cnp|passport|id|nino)\b/i;
+function isNameSensitive(name){return RE_CARD.test(name)||RE_ACCOUNT_HINTS.test(name)||RE_PASSWORD_HINTS.test(name)||RE_ID_HINTS.test(name)||RE_IBAN.test(name);}
+function redactFilename(name){const ext=path.extname(name);return {name:`REDACTED${ext}`,redacted:true,reason:'bank-or-identity-sensitive'};}
+function recognizeBankStatement(name){
+ const base=path.basename(name).toLowerCase();
+ const banks=['monzo','revolut','wise','chase','barclays','hsbc','lloyds','natwest','santander','ing','unicredit','bofa','boa','citibank','citi'];
+ const bank=banks.find(b=>base.includes(b));
+ const m=base.match(/(20\d{2})(?:[-_ ](\d{2}))?(?:[-_ ](\d{2}))?/);
+ if(!bank||!m)return null;const [ ,y,mo,dy]=m;const part=[y,mo,dy].filter(Boolean).join('-');return {kind:'bank_statement',bank,period:part};
+}
+function recognizeInvoice(name){
+ const base=path.basename(name);
+ const m=base.match(/(?:INV(?:OICE)?[-_ ]?)?(\d{4}-\d{2}-\d{2})[-_ ]+([A-Za-z][A-Za-z0-9 &'.-]{1,40})[-_ ]+(\d{1,6}(?:[.,]\d{2})?)[-_ ]*([A-Z]{3})/);
+ if(!m)return null;const [,date,client,amount,currency]=m;const val=parseFloat(amount.replace(',','.'));if(!isFinite(val))return null;return {kind:'invoice',client:client.trim(),date,currency,amount:val};
+}
+function inferDateFromNames(folderName,files){
+ const src=[folderName,...files.map(f=>f.name||'')].join(' ');
+ const iso=src.match(/(20\d{2})[-_ /.]?(\d{2})?[-_ /.]?(\d{2})?/);
+ if(iso){const y=iso[1],m=iso[2],d=iso[3];const date=[y,m,d].filter(Boolean).join('-');return {date,confidence:'inferred'};}return null;
+}
+function classifyLevel(rec,byPath){
+ if(rec.path==='.')return {level:'collection',type:'Collection'};
+ if(rec.children&&rec.children.length)return {level:'series',type:'Collection'};
+ return {level:'item',type:'Collection'};
+}
 function managed(rec,byPath,at){
  const folders=[...byPath.values()], total=folders.reduce((n,r)=>n+r.files.length,0);
  let s=`${START}\n\n## Archive map\n\n\`\`\`text\n${tree(rec,byPath,3,120)}\n\`\`\`\n\nChecked: **${at}** · recursively observed folders: **${folders.length}** · files: **${total}**. Only this selected root receives a note. The tree is shortened for readability; the local JSON contains the full recursive inventory.\n\n`;
@@ -53,8 +102,14 @@ function managed(rec,byPath,at){
 }
 function noteBodyFor(rec,byPath,at){
  let n=rec.original_note;
- const values={id:rec.id,index_updated_at:at,generated_inventory_at:at};
- if(!n){n=metadata('',{schema:'techistack-index/v3',id:rec.id,index_created_at:at,title:rec.name})+`\n# ${clean(rec.name)}\n\n## Context\n\n## Folder context\n\n## Notes\n\n`;}
+ // Dublin Core + minimal IPTC-friendly fields, preserving any existing values
+ const existing={subject:field(n||'','subject'),place:field(n||'','place'),status:field(n||'','status'),date:field(n||'','date'),date_confidence:field(n||'','date_confidence'),type:field(n||'','type')};
+ const classified=classifyLevel(rec,byPath);
+ const values={id:rec.id,index_updated_at:at,generated_inventory_at:at,title:rec.name,type:existing.type||classified.type,status:existing.status||rec.status||'raw'};
+ if(rec.subject?.length && !existing.subject)values.subject=rec.subject;
+ if(rec.place?.length && !existing.place)values.place=rec.place;
+ if(rec.date && !existing.date){values.date=rec.date;values.date_confidence=rec.date_confidence||'inferred';}
+ if(!n){n=metadata('',{schema:'techistack-index/v3',id:rec.id,index_created_at:at,title:rec.name,type:values.type,status:values.status})+`\n# ${clean(rec.name)}\n\n## Context\n\n## Folder context\n\n## Notes\n\n`;}
  else if(!field(n,'id')){
    if(n.startsWith('---'))n=metadata(n,{id:rec.id});
    else n=`---\nschema: techistack-index/v3\nid: ${JSON.stringify(rec.id)}\nindex_created_at: ${JSON.stringify(at)}\n---\n\n`+n;
@@ -130,7 +185,10 @@ async function writeSource(store,source,rows,previous=null){
  const refs=[];let batch=[],size=0;
  async function flush(){if(!batch.length)return;refs.push(await immutable(store,'sources/'+source.source_id+'/chunks',{schema:CHUNK,source_id:source.source_id,folders:batch}));batch=[];size=0;}
  const parents=new Map(rows.map(r=>[r.path,r.id]));
- for(const raw of rows){const r={...raw,kind:'folder',parent_id:raw.parent_id??(raw.path==='.'?null:parents.get(path.posix.dirname(raw.path))??null)};const n=Math.max(1,Math.ceil(r.files.length/FILES_PER_PART));for(let i=0;i<n;i++){
+ for(const raw of rows){
+  const r={...raw,kind:'folder',parent_id:raw.parent_id??(raw.path==='.'?null:parents.get(path.posix.dirname(raw.path))??null)};
+  const sigInput=r.files.map(f=>[f.size_bytes||0,f.sha256||null]);r.signature={method:'file-sizes-hashes/v1',sha256:sha(JSON.stringify(sigInput))};
+  const n=Math.max(1,Math.ceil(r.files.length/FILES_PER_PART));for(let i=0;i<n;i++){
    const part={...r,files:r.files.slice(i*FILES_PER_PART,(i+1)*FILES_PER_PART),file_part:i,file_parts:n};
    const bytes=Buffer.byteLength(json(part));if(batch.length&&size+bytes>CHUNK_BYTES)await flush();batch.push(part);size+=bytes;
  }}
@@ -195,6 +253,9 @@ async function run(rootArg,storeArg,{dryRun=false,hash=false,label}={}){
  const sourceId=sha(rootId+'\0'+root).slice(0,20),prevEntry=db.sources.find(s=>s.source_id===sourceId);
  const previous=await loadFolders(store,prevEntry),prevByPath=new Map(previous.map(r=>[r.path,r]));
  const scopedContext=annotations(original);
+ const vocab=await readVocab(store);
+ const approvals=await readPrivacyApprovals(store);
+ const approvedSet=new Set((approvals.approvals[sourceId]||[]));
  async function walk(abs,rel,parentId,inherited,labels){
   let entries;try{entries=await fs.readdir(abs,{withFileTypes:true});}catch(e){error(rel,'list',e);return;}
   entries.sort((a,b)=>a.name.localeCompare(b.name));
@@ -203,12 +264,37 @@ async function run(rootArg,storeArg,{dryRun=false,hash=false,label}={}){
   const context=scopedContext.has(rel)?scopedContext.get(rel):ownContext(legacy)||old?.context||'';
   const carried={origin_labels:old?.carried_context?.origin_labels||[...labels,path.basename(abs)],confirmed_context:[...inherited]};
   const chain=[...inherited];if(context)chain.push({source_id:id,source_title:path.basename(abs),text:context});
-  const rec={id,kind:'folder',parent_id:parentId,path:rel,name:path.basename(abs),description:scopedContext.has(rel)?context:field(legacy,'summary')||context.split('\n\n')[0]||old?.description||'',context,carried_context:carried,children:[],files:[],skipped:[]};folders.push(rec);
+  const rec={id,kind:'folder',parent_id:parentId,path:rel,name:path.basename(abs),description:scopedContext.has(rel)?context:field(legacy,'summary')||context.split('\n\n')[0]||old?.description||'',context,carried_context:carried,children:[],files:[],skipped:[]};
+  // tags from controlled vocabulary and status/date inference
+  const words=[...new Set([...(rel==='.'?[]:rel.split('/')),path.basename(abs)].map(s=>s.toLowerCase()))];
+  const tagPick=tagsFromVocab(vocab,words);
+  if(tagPick.subject.length)rec.subject=tagPick.subject;
+  if(tagPick.place.length)rec.place=tagPick.place;
+  rec.status=field(legacy,'status')||old?.status||'raw';
+  const dateGuess=inferDateFromNames(path.basename(abs),[]);
+  if(dateGuess){rec.date=dateGuess.date;rec.date_confidence=dateGuess.confidence;}
+  folders.push(rec);
   for(const ent of entries){if(ent.name==='_INDEX.md')continue;const dest=path.join(abs,ent.name);
    if(ent.name.startsWith('.')||SKIP.has(ent.name)||generated.test(ent.name)||/\.(?:app|photoslibrary|lrdata|lrlibrary)$/i.test(ent.name)||inside(dest,store)){rec.skipped.push({name:ent.name,reason:'system, dependency, generated output, package, or local store'});continue;}
    if(ent.isSymbolicLink()){rec.skipped.push({name:ent.name,reason:'symbolic link; not followed'});continue;}
-   if(ent.isDirectory()){rec.children.push(ent.name);await walk(dest,rel==='.'?ent.name:rel+'/'+ent.name,id,chain,carried.origin_labels);}
-   else if(ent.isFile()){try{const st=await fs.lstat(dest);if(!st.isFile()||st.isSymbolicLink())throw Error('Entry changed during scan');rec.files.push({name:ent.name,kind:'file',extension:path.extname(ent.name).toLowerCase(),size_bytes:st.size,modified_at:st.mtime.toISOString()});}catch(e){error(path.posix.join(rel,ent.name),'stat',e);}}
+   if(ent.isDirectory()){
+     const relative=rel==='.'?ent.name:rel+'/'+ent.name;
+     const sensitive=looksSensitiveFolder(ent.name)&&!approvedSet.has(relative);
+     if(sensitive){rec.skipped.push({name:ent.name,reason:'privacy-sensitive; requires approval'});continue;}
+     rec.children.push(ent.name);await walk(dest,relative,id,chain,carried.origin_labels);
+   }
+   else if(ent.isFile()){
+     try{
+       const st=await fs.lstat(dest);if(!st.isFile()||st.isSymbolicLink())throw Error('Entry changed during scan');
+       let fileRec={name:ent.name,kind:'file',extension:path.extname(ent.name).toLowerCase(),size_bytes:st.size,modified_at:st.mtime.toISOString()};
+       const sensitiveName=isNameSensitive(ent.name);
+       const bank=recognizeBankStatement(ent.name);
+       const inv=recognizeInvoice(ent.name);
+       if(sensitiveName||bank){const r=redactFilename(ent.name);fileRec={...fileRec,name:r.name,redacted:true};if(bank)fileRec.observed_as=bank;}
+       else if(inv){fileRec.observed_as=inv;}
+       rec.files.push(fileRec);
+     }catch(e){error(path.posix.join(rel,ent.name),'stat',e);}
+   }
   }
  }
  await walk(root,'.',null,[],[]);if(!folders.length)throw Error('Root could not be indexed');
@@ -253,7 +339,11 @@ async function review(store){
  const db=await readStore(store),sources=[];
  // Optional cross-source review holds the selected inventories in memory; normal search is chunked.
  for(const e of db.sources){const d=await descriptor(store,e);sources.push({...e,conflicts:d.conflicts||[],folders:(await loadFolders(store,e)).filter(r=>!r.location_status?.startsWith('not-observed'))});}
- return {candidate_duplicates:candidates(sources),identical_content:hashMatches(sources),conflicts:sources.flatMap(s=>(s.conflicts||[]).map(c=>({source:s.label,...c}))),note:'Candidates only; verify live locations, dependencies, and backup intent before proposing changes.'};
+ // Folder-signature matches (potential moves or duplicates across sources)
+ const bySig=new Map();
+ for(const s of sources)for(const r of s.folders){const k=r.signature?.sha256; if(!k)continue; const row={source:s.label,source_id:s.source_id,path:path.join(s.last_known_location,r.path),folder_id:r.id,signature:k}; if(!bySig.has(k))bySig.set(k,[]); bySig.get(k).push(row);}
+ const identical_folders=[...bySig.values()].filter(g=>g.length>1);
+ return {candidate_duplicates:candidates(sources),identical_content:hashMatches(sources),identical_folders,conflicts:sources.flatMap(s=>(s.conflicts||[]).map(c=>({source:s.label,...c}))),note:'Candidates only; verify live locations, dependencies, and backup intent before proposing changes.'};
 }
 export {run,readStore,loadFolders,find,review,writeSource};
 async function main(){
@@ -264,7 +354,23 @@ async function main(){
  if(cmd==='run'){if(rest.length!==1)throw Error('run requires one folder');console.log(json(await run(path.resolve(rest[0]),store,opts)));}
  else if(cmd==='find'){if(!rest.length)throw Error('find requires search terms');console.log(json(await find(store,rest.map(x=>x.toLowerCase()))));}
  else if(cmd==='review')console.log(json(await review(store)));
- else throw Error('Usage: index.mjs run <root> [--store <local folder>] [--dry-run] [--hash] [--label <name>] | find <terms...> [--store <folder>] | review [--store <folder>]');
+ else if(cmd==='privacy'){
+   const sub=rest.shift();
+   if(sub==='approve'){
+     if(rest.length<2)throw Error('privacy approve requires <root> <relative-path>');
+     const root=path.resolve(rest[0]);const real=await fs.realpath(root);
+     const original=await text(path.join(real,'_INDEX.md'));
+     const rootId=field(original,'id')||crypto.randomUUID();
+     const sourceId=sha(rootId+'\0'+real).slice(0,20);
+     const approvals=await readPrivacyApprovals(store);approvals.approvals[sourceId]=approvals.approvals[sourceId]||[];
+     const rel=rest[1];if(path.isAbsolute(rel))throw Error('relative-path must be relative to the selected root');
+     if(!approvals.approvals[sourceId].includes(rel))approvals.approvals[sourceId].push(rel);
+     await writePrivacyApprovals(store,approvals);console.log(json({ok:true,approved:{source_id:sourceId,path:rel}}));
+   }else if(sub==='list'){
+     console.log(json(await readPrivacyApprovals(store)));
+   }else throw Error('Usage: privacy approve <root> <relative-path> | privacy list');
+ }
+ else throw Error('Usage: index.mjs run <root> [--store <local folder>] [--dry-run] [--hash] [--label <name>] | find <terms...> [--store <folder>] | review [--store <folder>] | privacy approve <root> <relative-path> [--store <folder>] | privacy list [--store <folder>]');
 }
 const invokedPath=process.argv[1]?await fs.realpath(process.argv[1]).catch(()=>null):null;
 if(invokedPath&&invokedPath===await fs.realpath(fileURLToPath(import.meta.url)))main().catch(e=>{console.error('index: '+e.message);process.exitCode=1;});
