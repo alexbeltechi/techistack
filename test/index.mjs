@@ -72,5 +72,20 @@ try{
  // Move/identity heuristics: identical folder signatures across sources are reported
  const moved=path.join(tmp,'moved-root');await fs.mkdir(path.join(moved,'Cabin'),{recursive:true});await fs.writeFile(path.join(moved,'Cabin','manual.pdf'),'fake PDF fixture');await run(moved,store,{});
  const rev2=await review(store);assert(rev2.identical_folders.some(g=>g.length>=2));
+ // Obsidian config: created and merged safely
+ const obs=path.join(store,'.obsidian');await fs.stat(obs);
+ const appPath=path.join(obs,'app.json');const graphPath=path.join(obs,'graph.json');
+ const app=JSON.parse(await fs.readFile(appPath,'utf8'));
+ assert(Array.isArray(app.userIgnoreFilters)&&app.userIgnoreFilters.some(s=>s==='sources/')&&app.userIgnoreFilters.some(s=>s==='migrations/'));
+ const graph=JSON.parse(await fs.readFile(graphPath,'utf8'));
+ assert(Array.isArray(graph.groups)&&graph.groups.some(g=>g.query==='file: \"_INDEX.md\"'));
+ // Merge: preserve keys and avoid duplicates
+ await fs.writeFile(appPath,JSON.stringify({theme:'moon',userIgnoreFilters:['custom/']},null,2));
+ await fs.writeFile(graphPath,JSON.stringify({layout:'force',groups:[{query:'path:topic/',color:'#000'}]},null,2));
+ await run(root,store,{});
+ const app2=JSON.parse(await fs.readFile(appPath,'utf8'));
+ assert(app2.theme==='moon'&&app2.userIgnoreFilters.includes('custom/')&&app2.userIgnoreFilters.includes('sources/'));
+ const graph2=JSON.parse(await fs.readFile(graphPath,'utf8'));
+ assert(graph2.layout==='force'&&graph2.groups.filter(g=>g.query==='path:topic/').length===1&&graph2.groups.some(g=>g.query==='path:place/'));
  console.log('PASS: root-only notes, full recursion, preserved context/IDs, missing locations, per-source chunks, latest+previous retention, migration, cross-chunk search, duplicate review, nested code, symlink/Git protection, dry run, and unchanged source files.');
 }finally{await fs.rm(tmp,{recursive:true,force:true});}

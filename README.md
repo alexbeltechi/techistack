@@ -64,6 +64,11 @@ Moving a child folder alone does not carry the root note. Log moves and refresh 
 
 Root note frontmatter now follows Dublin Core names (`title`, `type`, `date` + `date_confidence`, `subject`, `place`, `status`). Tags are matched from a local controlled vocabulary (`~/Documents/Index/vocab.json`). Bank/identity-sensitive details never appear in notes or JSON: suspicious filenames are redacted, while invoices and bank statements are recorded only as structured facts (client/date/amount/currency; bank/period).
 
+Obsidian (optional): when the local store is opened as a vault, `/index` writes or merges a minimal `.obsidian` config inside the store (never in your work folders):
+
+- `.obsidian/app.json`: adds `userIgnoreFilters` for raw data folders (`migrations/`, `sources/`, `privacy/`, `snapshots/`, `reviews/`), merged with your existing settings.
+- `.obsidian/graph.json`: adds color groups for note types — `_INDEX` notes, and `topic/`, `place/`, `period/` pages — merged with any existing groups. Files are never wikilinked by `/index`, so the graph stays a readable map of structure and topics.\n\nObsidian is optional and not required to use TechiStack; configs are merged safely and any existing keys are preserved.
+
 ## how /curate works
 
 every run is a new curation, a folder next to your work:

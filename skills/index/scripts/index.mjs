@@ -220,6 +220,31 @@ async function prune(store,entry){
   const d=JSON.parse(body);if(d.source_id===entry.source_id&&[SOURCE,CHUNK].includes(d.schema))await fs.unlink(p);
  }
 }
+// --- Obsidian minimal config: merge-only helper ---
+async function ensureObsidianConfig(store){
+ const dir=path.join(store,'.obsidian');await fs.mkdir(dir,{recursive:true});
+ // app.json: userIgnoreFilters merge
+ const appPath=path.join(dir,'app.json');let app={};
+ try{const raw=await fs.readFile(appPath,'utf8');app=JSON.parse(raw);}catch{}
+ const desiredIgnores=['migrations/','sources/','privacy/','snapshots/','reviews/'];
+ const existingIgnores=Array.isArray(app.userIgnoreFilters)?app.userIgnoreFilters:[];
+ const mergedIgnores=[...new Set([...existingIgnores,...desiredIgnores])];
+ if(mergedIgnores.length)app.userIgnoreFilters=mergedIgnores;
+ await fs.writeFile(appPath,json(app),{flag:'w'});
+ // graph.json: color groups merge
+ const graphPath=path.join(dir,'graph.json');let graph={};
+ try{const raw=await fs.readFile(graphPath,'utf8');graph=JSON.parse(raw);}catch{}
+ const wantGroups=[
+  {query:'file: "_INDEX.md"',color:'#6aa84f'},
+  {query:'path:topic/',color:'#3d85c6'},
+  {query:'path:place/',color:'#674ea7'},
+  {query:'path:period/',color:'#e69138'}
+ ];
+ const groups=Array.isArray(graph.groups)?graph.groups:[];
+ for(const g of wantGroups){if(!groups.some(x=>String(x.query)===g.query))groups.push(g);}
+ if(groups.length)graph.groups=groups;
+ await fs.writeFile(graphPath,json(graph),{flag:'w'});
+}
 async function migrate(store,db){
  if(db.schema===MANIFEST)return db;
  const stamp=new Date().toISOString().replace(/[:.]/g,'-');
@@ -327,6 +352,7 @@ async function run(rootArg,storeArg,{dryRun=false,hash=false,label}={}){
   const entry=await writeSource(store,source,[...folders,...unobserved],prior?.latest||null);
   manifest.sources=manifest.sources.filter(s=>s.source_id!==sourceId);manifest.sources.push(entry);manifest.updated_at=at;
   await atomic(path.join(store,'index.json'),json(manifest));
+  await ensureObsidianConfig(store);
   await prune(store,entry);
   if(!await exists(path.join(store,'.gitignore')))await fs.writeFile(path.join(store,'.gitignore'),'*\n',{flag:'wx'});
   summary.coverage=source.coverage;summary.latest=refPath(store,entry.latest);summary.previous=entry.previous?refPath(store,entry.previous):null;

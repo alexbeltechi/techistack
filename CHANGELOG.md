@@ -8,6 +8,8 @@
   - Sensitive folders (finance/bank/tax/medical/passwords/contracts, etc.) are flagged and skipped until approved per source (`privacy approve <root> <relative-path>`).
   - Bank/identity-sensitive details are never copied: suspicious filenames are redacted in notes and JSON. Issued invoices and bank statements are recorded only as structured facts (client/date/amount/currency; bank/period), without account numbers.
 - Inventory rows include a privacy-safe folder “signature” (hash of file sizes + available content hashes). `review` reports `identical_folders` across sources (move/duplicate leads) alongside existing duplicate groups and conflicts.
+- Obsidian graph hygiene: the generated block adds `[[wikilinks]]` only for other notes — child folders’ `_INDEX` notes and optional topic/place/period nodes — never for files. Files are plain links/code spans. This keeps the graph readable and avoids one-node-per-image.
+- Optional Obsidian config in the local store: merge a minimal `.obsidian/app.json` with `userIgnoreFilters` for raw data folders and a `.obsidian/graph.json` with color groups for `_INDEX`, `topic/`, `place/`, and `period/` notes. Existing keys are preserved; tests cover safe merge behavior.
 - Docs: `skills/index/SKILL.md`, schema references, and README updated.
 
 ## 0.10.1 — 2026-11-01
