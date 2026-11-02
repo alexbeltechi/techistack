@@ -86,6 +86,7 @@ function classifyLevel(rec,byPath){
  if(rec.children&&rec.children.length)return {level:'series',type:'Collection'};
  return {level:'item',type:'Collection'};
 }
+function wikiPathForFolder(rel){return (rel==='.'?'':rel.replace(/\\/g,'/'))+(rel==='.'?'':'/')+'_INDEX';}
 function managed(rec,byPath,at){
  const folders=[...byPath.values()], total=folders.reduce((n,r)=>n+r.files.length,0);
  let s=`${START}\n\n## Archive map\n\n\`\`\`text\n${tree(rec,byPath,3,120)}\n\`\`\`\n\nChecked: **${at}** · recursively observed folders: **${folders.length}** · files: **${total}**. Only this selected root receives a note. The tree is shortened for readability; the local JSON contains the full recursive inventory.\n\n`;
@@ -97,7 +98,16 @@ function managed(rec,byPath,at){
  for(const f of rec.files.slice(0,100))s+=`- [${clean(f.name)}](${href(f.name)}) — ${f.size_bytes} bytes\n`;
  if(rec.files.length>100)s+='\nDirect-file list shortened; all filenames are in the local inventory.\n';
  const skipped=folders.reduce((n,r)=>n+r.skipped.length,0);
- s+=`\nExcluded entries: ${skipped}; individual exclusions and scan errors are recorded in the local JSON. Keep source notes and inventories local unless deliberately reviewed for sharing.\n\n${END}`;
+ s+=`\nExcluded entries: ${skipped}; individual exclusions and scan errors are recorded in the local JSON. Keep source notes and inventories local unless deliberately reviewed for sharing.\n\n`;
+ // Wiki graph: link only notes (folders/topics/places/periods), never files
+ const childLinks=(rec.children||[]).slice(0,200).map(name=>`- [[${(rec.path==='.'?name:rec.path+'/'+name).replace(/\\/g,'/')}/_INDEX]]`).join('\n');
+ const topicLinks=(rec.subject||[]).map(t=>`[[topic/${t}]]`).join(' ');
+ const placeLinks=(rec.place||[]).map(t=>`[[place/${t}]]`).join(' ');
+ const periodLink=rec.date?`[[period/${rec.date.slice(0,7)}]]`:'';
+ s+='### Wiki graph\n\n';
+ if(childLinks)s+=`Children notes:\n\n${childLinks}\n\n`;
+ if(topicLinks||placeLinks||periodLink)s+=`Topics: ${[topicLinks,placeLinks,periodLink].filter(Boolean).join(' ')}\n\n`;
+ s+=`${END}`;
  return s;
 }
 function noteBodyFor(rec,byPath,at){

@@ -18,6 +18,10 @@ try{
  for(const rel of ['Catalog','Catalog/Model','Cabin'])await assert.rejects(fs.stat(path.join(root,rel,'_INDEX.md')));
  await assert.rejects(fs.stat(path.join(store,'INDEX.md')));
  const note=await fs.readFile(path.join(root,'_INDEX.md'),'utf8');assert(note.includes('Keep this sentence.'));assert(note.includes('id: "archive-stable"'));assert(!note.includes('Catalog/_INDEX.md'));assert(note.includes('Catalog/Model/'));
+ // Wiki graph: folders only, not files
+ assert(note.includes('### Wiki graph'));
+ assert(note.includes('[[Catalog/_INDEX]]'));
+ assert(!/\[\[[^\]]+\.(?:jpg|jpeg|png|pdf|docx)\]\]/i.test(note));
  assert(note.trimEnd().endsWith('<!-- techistack:credit:end -->'));
  assert.equal(note.split('Created with [TechiStack /index](https://github.com/alexbeltechi/techistack).').length-1,1);
  await fs.appendFile(path.join(root,'_INDEX.md'),'\nUser note added after the existing footer.\n');

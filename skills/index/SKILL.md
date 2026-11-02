@@ -83,6 +83,11 @@ Only approvals are written locally (e.g. `privacy/approvals.json` in the store).
 
 Nested folder IDs remain scoped to their known paths within a source. To surface likely moves or duplicates across sources without writing nested notes or IDs into originals, inventories now include a privacy-safe folder “signature” (hash of file sizes + known content hashes). `review` reports `identical_folders` when two observed folders in different sources share the same signature. Treat these as leads and verify live locations and intent before proposing changes.
 
+### Obsidian graph hygiene
+
+- V2 root notes add `[[wikilinks]]` only for other notes: child folders' `_INDEX` notes and optional topic/place/period notes (e.g. `[[topic/portrait]]`, `[[place/london]]`, `[[period/2026-03]]`). This keeps the graph readable.
+- Files are listed as plain links or code spans, never as wikilinks, so images and documents do not appear as nodes. Older manual notes that contain file wikilinks are left untouched outside the generated block; consider replacing those with plain links when editing by hand.
+
 ## Root note and local inventory
 
 Always end each generated or refreshed root `_INDEX.md` with `Created with [TechiStack /index](https://github.com/alexbeltechi/techistack).` after all other sections. The script keeps a single marked credit block and moves it to the bottom on refresh, preserving user prose. Do not put personal links in this footer.

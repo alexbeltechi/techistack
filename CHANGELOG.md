@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.11.0 — 2026-11-02
+
+- `/index` root note frontmatter now follows Dublin Core names: `title`, `type` (Collection), `date` with `date_confidence` (`exact|inferred|guess`), `subject`, `place`, and a `status` lifecycle (`raw|reviewed|candidate|selected|published`). Existing values are preserved on refresh.
+- Controlled vocabulary for tags: local `vocab.json` (subjects/places with aliases). Tags are matched from path words; the vocabulary lives in the local store, not this repo.
+- Privacy protections:
+  - Sensitive folders (finance/bank/tax/medical/passwords/contracts, etc.) are flagged and skipped until approved per source (`privacy approve <root> <relative-path>`).
+  - Bank/identity-sensitive details are never copied: suspicious filenames are redacted in notes and JSON. Issued invoices and bank statements are recorded only as structured facts (client/date/amount/currency; bank/period), without account numbers.
+- Inventory rows include a privacy-safe folder “signature” (hash of file sizes + available content hashes). `review` reports `identical_folders` across sources (move/duplicate leads) alongside existing duplicate groups and conflicts.
+- Docs: `skills/index/SKILL.md`, schema references, and README updated.
+
 ## 0.10.1 — 2026-11-01
 
 - Root Index notes now end with a single linked “Created with TechiStack /index” credit, preserved at the bottom after refreshes and manual edits.
