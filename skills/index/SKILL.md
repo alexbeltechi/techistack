@@ -91,9 +91,9 @@ Nested folder IDs remain scoped to their known paths within a source. To surface
 
 ### Store map for Obsidian (read-only)
 
-- The local store now contains a generated map for Obsidian under `map/`: one small note per folder (`map/<source>/<relative>/_INDEX.md`) with Dublin Core frontmatter (title, type, date/date_confidence, subject, place, status) plus `source`, `location`, and direct-file counts. A flagged folder shows only a consent marker.
-- Notes are wikilinked up to the parent, down to child folders and across to `topic/`, `place/`, and `period/` notes. Files are listed as plain text (never wikilinks).
-- `map/README.md` links each source’s root. The map is regenerated on every index run (stale notes removed); it is read-only and separate from your originals.
+- The local store now contains a generated map for Obsidian under `map/`: one small note per folder (`map/<source>/<relative>/<Folder>.md`) with Dublin Core frontmatter (title, type, level, date/date_confidence, subject, place, status) plus `source`, `location`, file counts and size, and a date range inferred from mtimes; a flagged folder shows only a consent marker. Derived fields record their provenance and confidence.
+- Notes are wikilinked up to the parent, down to child folders and across to `topic/`, `place/`, and `period/` notes. Files are listed as plain text (never wikilinks). `map/Home.md` links each source hub, and `map/<source>.md` is the drive/source hub.
+- Folders inside code repositories only get one note at the repo root; dependency/build and app-library folders are excluded. Notes carry tags for color groups: `type/source`, `type/folder`, `type/system`.
 
 ## Root note and local inventory
 

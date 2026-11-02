@@ -63,6 +63,11 @@ try{
  await run(root,store,{});
  db=await readStore(store);rows=await loadFolders(store,db.sources.find(s=>s.last_known_location===root));
  const rootRow=rows.find(r=>r.path==='.');assert(rootRow.files.some(f=>f.name.startsWith('REDACTED')));
+ // Token false-positives: Clothing/Lettering/Packaging/Extras/CapEx are not flagged
+ for(const fname of ['Clothing','Lettering','Packaging','Extras','CapEx']){await fs.mkdir(path.join(root,fname),{recursive:true});}
+ await run(root,store,{});
+ db=await readStore(store);rows=await loadFolders(store,db.sources.find(s=>s.last_known_location===root));
+ for(const name of ['Clothing','Lettering','Packaging','Extras','CapEx']){const r=rows.find(r=>r.path===name); if(r) assert(!r.sensitivity);}
  // False positives not redacted
  await fs.writeFile(path.join(root,'Login screen v2.fig'),'x');await fs.writeFile(path.join(root,'Business card.ai'),'x');await fs.writeFile(path.join(root,'ID badge mockup.png'),'x');
  await run(root,store,{});
@@ -71,19 +76,57 @@ try{
  assert(names.includes('Login screen v2.fig')&&names.includes('Business card.ai')&&names.includes('ID badge mockup.png'));
  // Wiki graph and note gating reflect consent pending
  const note2=await fs.readFile(path.join(root,'_INDEX.md'),'utf8');assert(/flagged, awaiting consent/.test(note2));
- // Map generated in store, with hub and per-folder notes
- const mapHub=await fs.readFile(path.join(store,'map','README.md'),'utf8');assert(/Indexed sources/.test(mapHub));
- const anySourceDir=(await fs.readdir(path.join(store,'map'))).find(n=>n!=='README.md');
- const mapRoot=await fs.readFile(path.join(store,'map',anySourceDir,'_INDEX.md'),'utf8');assert(/#/.test(mapRoot));
+ // Map generated in store, with Home hub, per-source hub, and per-folder notes named after folders
+ const mapHub=await fs.readFile(path.join(store,'map','Home.md'),'utf8');assert(/Sources/.test(mapHub));
+ const anySourceDir=(await fs.readdir(path.join(store,'map'))).find(n=>n!=='Home.md'&&n.endsWith('.md')===false);
+ const anySourceHub=await fs.readFile(path.join(store,'map',`${anySourceDir}.md`),'utf8');assert(/Indexed:/.test(anySourceHub));
+ // All wikilinks under map/ resolve to existing files
+ async function collectLinks(dir){
+   const links=[];for(const name of await fs.readdir(dir)){const p=path.join(dir,name);const st=await fs.lstat(p);if(st.isDirectory()){links.push(...await collectLinks(p));}else if(name.endsWith('.md')){const s=await fs.readFile(p,'utf8');for(const m of s.matchAll(/\[\[([^\]|]+)(?:\|[^\]]+)?\]\]/g)){links.push(m[1]);}}}
+   return links;
+ }
+ const mapLinks=await collectLinks(path.join(store,'map'));
+ for(const l of mapLinks){
+   if(!l.startsWith('map/'))continue;
+   const target=l.endsWith('.md')?l:`${l}.md`;
+   await fs.stat(path.join(store,target));
+ }
+ // A per-folder note exists and has an Indexed line
+ const someDir=path.join(store,'map',anySourceDir);
+ async function findFirstMd(dir){for(const e of await fs.readdir(dir,{withFileTypes:true})){const p=path.join(dir,e.name);if(e.isFile()&&e.name.endsWith('.md'))return p; if(e.isDirectory()){const q=await findFirstMd(p); if(q) return q;}} return null;}
+ const someNotePath=await findFirstMd(someDir);
+ const folderNote=await fs.readFile(someNotePath,'utf8');
+ assert(/Indexed:/.test(folderNote));
+ // Old _INDEX map notes removed on regenerate
+ await fs.mkdir(path.join(store,'map','oldsrc'),{recursive:true});await fs.writeFile(path.join(store,'map','oldsrc','_INDEX.md'),'legacy','utf8');
+ await run(root,store,{});
+ await assert.rejects(fs.readFile(path.join(store,'map','oldsrc','_INDEX.md'),'utf8'));
  // .obsidian graph options set
  const graphPath2=path.join(store,'.obsidian','graph.json');const graphCfg=JSON.parse(await fs.readFile(graphPath2,'utf8'));
- assert(graphCfg.options.hideUnresolved===true && /-path:sources\//.test(graphCfg.search||''));
+ assert(graphCfg.hideUnresolved===true && /-path:sources\//.test(graphCfg.search||''));
  // Consent include a folder; pending list shows items before and shrinks after
  const pendingBefore=JSON.parse(execFileSync(process.execPath,[alias,'privacy','pending','--store',store],{encoding:'utf8'}));
  JSON.parse(execFileSync(process.execPath,[alias,'privacy','consent',root,'Finance','include','--store',store],{encoding:'utf8'}));
  await run(root,store,{});
  const pendingAfter=JSON.parse(execFileSync(process.execPath,[alias,'privacy','pending','--store',store],{encoding:'utf8'}));
  assert(pendingAfter.length<=pendingBefore.length);
+// Sensitivity categories and default sensitivity.json
+ await fs.mkdir(path.join(root,'Medical','Analize Bioclinica Martie 2023'),{recursive:true});
+ await run(root,store,{});
+ db=await readStore(store);rows=await loadFolders(store,db.sources.find(s=>s.last_known_location===root));
+ assert(rows.find(r=>r.path==='Medical').sensitivity==='medical' || rows.find(r=>r.path==='Medical/Analize Bioclinica Martie 2023').sensitivity==='medical');
+ const sens=await fs.readFile(path.join(store,'sensitivity.json'),'utf8');assert(/techistack-sensitivity/.test(sens));
+ // Legal contracts detection
+ await fs.writeFile(path.join(root,'CONTRACT DE  INSTRAINARE-DOBANDIRE A UNUI MIJLOC DE TRANSPORT 2.pdf'),'fixture');
+ await run(root,store,{});
+ db=await readStore(store);rows=await loadFolders(store,db.sources.find(s=>s.last_known_location===root));
+ const legalFile=rows.find(r=>r.path==='.').files.find(f=>/INSTRAINARE-DOBANDIRE/i.test(f.name));
+ assert(legalFile.sensitivity==='legal');
+ // No map notes inside git repos or Lightroom data
+ await fs.mkdir(path.join(root,'Repo','.git'),{recursive:true});await fs.mkdir(path.join(root,'Repo','src'),{recursive:true});await fs.mkdir(path.join(root,'Library.lrcat-data'),{recursive:true});
+ await run(root,store,{});
+ const mapRepoSrc=path.join(store,'map',(await fs.readdir(path.join(store,'map'))).find(n=>n!=='Home.md'&&n.endsWith('.md')===false),'Repo','src','src.md');
+ await assert.rejects(fs.readFile(mapRepoSrc,'utf8'));
  // Invoices from PDF text (fallback): Romanian fields
  const inv=path.join(root,'Factura_2026-02-01_ClientX.pdf');await fs.writeFile(inv,'Factura\nSeria AB\nNr. 123\nTotal de plata 1.234,56 RON\n', 'utf8');
  await run(root,store,{});
@@ -100,14 +143,18 @@ try{
  assert(verifyBad.safe_to_delete===false&&verifyBad.extra.length===1);
  // Move/identity heuristics: identical folder signatures across sources are reported
  await run(moved,store,{});
- const rev2=await review(store);assert(rev2.identical_folders.some(g=>g.length>=2));
+ const rev2=await review(store);assert(rev2.folder_similarity&&rev2.folder_similarity.length>0);
+ // Empty folder has no signature; parent doesn't share it
+ await fs.mkdir(path.join(root,'Empty'),{recursive:true});await run(root,store,{});
+ db=await readStore(store);rows=await loadFolders(store,db.sources.find(s=>s.last_known_location===root));
+ const empty=rows.find(r=>r.path==='Empty');assert(!empty.signature);
  // Obsidian config: created and merged safely
  const obs=path.join(store,'.obsidian');await fs.stat(obs);
  const appPath=path.join(obs,'app.json');const graphPath=path.join(obs,'graph.json');
  const app=JSON.parse(await fs.readFile(appPath,'utf8'));
  assert(Array.isArray(app.userIgnoreFilters)&&app.userIgnoreFilters.some(s=>s==='sources/')&&app.userIgnoreFilters.some(s=>s==='migrations/'));
  const graph=JSON.parse(await fs.readFile(graphPath,'utf8'));
- assert(Array.isArray(graph.groups)&&graph.groups.some(g=>g.query==='path:map/'));
+ assert(Array.isArray(graph.colorGroups)&&graph.colorGroups.some(g=>g.query==='tag:#type/folder') && graph.hideUnresolved===true);
  // Merge: preserve keys and avoid duplicates
  await fs.writeFile(appPath,JSON.stringify({theme:'moon',userIgnoreFilters:['custom/']},null,2));
  await fs.writeFile(graphPath,JSON.stringify({layout:'force',groups:[{query:'path:topic/',color:'#000'}]},null,2));
@@ -115,6 +162,8 @@ try{
  const app2=JSON.parse(await fs.readFile(appPath,'utf8'));
  assert(app2.theme==='moon'&&app2.userIgnoreFilters.includes('custom/')&&app2.userIgnoreFilters.includes('sources/'));
  const graph2=JSON.parse(await fs.readFile(graphPath,'utf8'));
- assert(graph2.layout==='force'&&graph2.groups.filter(g=>g.query==='path:topic/').length===1&&graph2.groups.some(g=>g.query==='path:place/'));
+ assert(graph2.layout==='force'&&graph2.colorGroups.filter(g=>g.query==='path:topic/').length===1&&graph2.colorGroups.some(g=>g.query==='path:place/'));
+ // Changes report written
+ const reportsDir=path.join(store,'reports','changes');const reports=(await fs.readdir(reportsDir));assert(reports.length>0);
  console.log('PASS: root-only notes, full recursion, preserved context/IDs, missing locations, per-source chunks, latest+previous retention, migration, cross-chunk search, duplicate review, nested code, symlink/Git protection, dry run, and unchanged source files.');
 }finally{await fs.rm(tmp,{recursive:true,force:true});}

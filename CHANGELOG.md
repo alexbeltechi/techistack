@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.11.1 — 2026-11-02
+## 0.12.0 — 2026-11-02
 
 - `/index` root note frontmatter now follows Dublin Core names: `title`, `type` (Collection), `date` with `date_confidence` (`exact|inferred|guess`), `subject`, `place`, and a `status` lifecycle (`raw|reviewed|candidate|selected|published`). Existing values are preserved on refresh.
 - Controlled vocabulary for tags: local `vocab.json` (subjects/places with aliases). Tags are matched from path words; the vocabulary lives in the local store, not this repo.
@@ -17,6 +17,13 @@ Patch updates in 0.11.1:
 - Store map for Obsidian: `map/` holds one small note per folder per source, wikilinked up/down/across, plus a `map/README.md` hub. Regenerated every run and works when drives are unmounted.
 - Obsidian graph config: `hideUnresolved: true`, `search` excludes raw data paths, color group for `path:map/`.
 - `verify-copy <source-path> <dest-path>`: compares by size + SHA-256, writes a dated report into the store, and records a move-verification event in the manifest. `review` now reports `signature_conflicts` for the same relative path with different signatures across sources.
+
+Additional fixes in 0.12.0:
+- Sensitivity matching now uses whole-word tokens (split on non‑letters and camelCase). Short bank names (ING/BT/CEC/BRD/BCR) only match as standalone tokens. No stemming (e.g. `extras` ≠ `extrase`). Default `sensitivity.json` is written on first run and is user‑extendable.
+- Sensitivity categories beyond financial: detect medical (analize, bioclinica, synevo, regina maria, medlife, reteta, spital, clinica), identity (cnp, buletin, pasaport, permis…), and legal/contracts (contract, instrainare, dobandire, notar, proces verbal…), with Romanian and English terms, by whole tokens.
+- Folder signatures fixed: signatures now cover the recursive subtree (relative names + sizes + hashes when known), are omitted for empty folders, and identical_folders suppress parent/child nesting.
+- Duplicate roll‑up: `review` adds `folder_similarity` entries summarizing folder‑level matches by name+size across sources.
+- Obsidian map improvements: note files are named after folders (not `_INDEX`), with a global `Home.md`, one hub per source, tags for color grouping (`type/source`, `type/folder`, `type/system`), and only up/down/across links. Map excludes code-repo internals and app libraries; only the repo root is noted.
 
 ## 0.10.1 — 2026-11-01
 
