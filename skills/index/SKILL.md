@@ -28,6 +28,61 @@ Confirm the intended source and local store on first use. Documents may itself b
 4. Review errors and exclusions. `complete-with-exclusions` means recursive coverage of the included scope, not a byte-for-byte audit of the drive. Errors produce `partial` coverage. Hidden entries, dependency/build folders, app libraries, generated TechiStack outputs, symlinks, and the local store are excluded and recorded. User folders such as `_Website`, `_export`, and `_audio` are included.
 5. Offer optional duplicate/organization review after indexing. Do not execute proposed moves or deletions as part of this pass.
 
+### Frontmatter fields: Dublin Core and IPTC-aligned
+
+The root `_INDEX.md` uses Dublin Core field names where applicable:
+
+- `title` (folder name), `type` (Collection), `date` with `date_confidence` (`exact|inferred|guess`), `subject` (tags), `place` (tags), `status` (`raw|reviewed|candidate|selected|published`).
+- Fields are only added when absent in existing frontmatter. Human edits are preserved.
+- Dates are inferred conservatively from folder/file names in this version; EXIF/metadata “exact” capture dates are not read.
+
+When a file name indicates an issued invoice or a bank statement, the local JSON stores only structured facts:
+
+- invoice: `{ kind: "invoice", client, date, amount, currency }`
+- bank statement: `{ kind: "bank_statement", bank, period }`
+
+Account numbers, IBANs, balances, card numbers and passwords are never written to notes, JSON or logs; file names matching such patterns are redacted in both places.
+
+### Controlled vocabulary
+
+Subject and place tags come from a local controlled vocabulary stored alongside the manifest (default `~/Documents/Index/vocab.json`). It supports canonical tags with aliases:
+
+```json
+{
+  "schema": "techistack-vocabulary/v1",
+  "subjects": [{ "tag": "portrait", "aliases": ["portraits"] }],
+  "places":   [{ "tag": "london",   "aliases": ["ldn"] }]
+}
+```
+
+Tags are matched case-insensitively against folder path words. The vocabulary file is local and outside this public repo.
+
+### Levels and status
+
+This version classifies folders heuristically for description/export:
+
+- Root: `type: Collection`, level “collection”
+- Folders with children: level “series”
+- Leaf folders: level “item”
+
+Frontmatter gains/retains a `status` (`raw|reviewed|candidate|selected|published`). Existing IDs and any existing status are preserved on refresh.
+
+### Privacy and approvals
+
+- Folders with names like `finance`, `bank`, `tax`, `medical`, `passwords`, `contracts`, etc. are flagged as privacy-sensitive and skipped by default.
+- Approve a sensitive path once per source to include it:
+
+```bash
+node <skill>/scripts/index.mjs privacy approve "<root>" "<relative-path>"
+node <skill>/scripts/index.mjs privacy list
+```
+
+Only approvals are written locally (e.g. `privacy/approvals.json` in the store).
+
+### Moves and conflicts
+
+Nested folder IDs remain scoped to their known paths within a source. To surface likely moves or duplicates across sources without writing nested notes or IDs into originals, inventories now include a privacy-safe folder “signature” (hash of file sizes + known content hashes). `review` reports `identical_folders` when two observed folders in different sources share the same signature. Treat these as leads and verify live locations and intent before proposing changes.
+
 ## Root note and local inventory
 
 Always end each generated or refreshed root `_INDEX.md` with `Created with [TechiStack /index](https://github.com/alexbeltechi/techistack).` after all other sections. The script keeps a single marked credit block and moves it to the bottom on refresh, preserving user prose. Do not put personal links in this footer.

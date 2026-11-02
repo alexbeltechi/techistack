@@ -62,6 +62,8 @@ The default is the executing user's `~/Documents/Index`, never the maintainer's 
 
 Moving a child folder alone does not carry the root note. Log moves and refresh the affected roots; report stale/disconnected locations as last known. Duplicate candidates are evidence for review, not permission to delete. See the [JSON schema](skills/index/references/schema.md) for future exports.
 
+Root note frontmatter now follows Dublin Core names (`title`, `type`, `date` + `date_confidence`, `subject`, `place`, `status`). Tags are matched from a local controlled vocabulary (`~/Documents/Index/vocab.json`). Bank/identity-sensitive details never appear in notes or JSON: suspicious filenames are redacted, while invoices and bank statements are recorded only as structured facts (client/date/amount/currency; bank/period).
+
 ## how /curate works
 
 every run is a new curation, a folder next to your work:
