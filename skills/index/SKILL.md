@@ -28,6 +28,73 @@ Confirm the intended source and local store on first use. Documents may itself b
 4. Review errors and exclusions. `complete-with-exclusions` means recursive coverage of the included scope, not a byte-for-byte audit of the drive. Errors produce `partial` coverage. Hidden entries, dependency/build folders, app libraries, generated TechiStack outputs, symlinks, and the local store are excluded and recorded. User folders such as `_Website`, `_export`, and `_audio` are included.
 5. Offer optional duplicate/organization review after indexing. Do not execute proposed moves or deletions as part of this pass.
 
+### Frontmatter fields: Dublin Core and IPTC-aligned
+
+The root `_INDEX.md` uses Dublin Core field names where applicable:
+
+- `title` (folder name), `type` (Collection), `date` with `date_confidence` (`exact|inferred|guess`), `subject` (tags), `place` (tags), `status` (`raw|reviewed|candidate|selected|published`).
+- Fields are only added when absent in existing frontmatter. Human edits are preserved.
+- Dates are inferred conservatively from folder/file names in this version; EXIF/metadata “exact” capture dates are not read.
+
+When a file name indicates an issued invoice or a bank statement, the local JSON stores only structured facts:
+
+- invoice: `{ kind: "invoice", client, date, amount, currency }`
+- bank statement: `{ kind: "bank_statement", bank, period }`
+
+Account numbers, IBANs, balances, card numbers and passwords are never written to notes, JSON or logs; file names matching such patterns are redacted in both places.
+
+### Controlled vocabulary
+
+Subject and place tags come from a local controlled vocabulary stored alongside the manifest (default `~/Documents/Index/vocab.json`). It supports canonical tags with aliases:
+
+```json
+{
+  "schema": "techistack-vocabulary/v1",
+  "subjects": [{ "tag": "portrait", "aliases": ["portraits"] }],
+  "places":   [{ "tag": "london",   "aliases": ["ldn"] }]
+}
+```
+
+Tags are matched case-insensitively against folder path words. The vocabulary file is local and outside this public repo.
+
+### Levels and status
+
+This version classifies folders heuristically for description/export:
+
+- Root: `type: Collection`, level “collection”
+- Folders with children: level “series”
+- Leaf folders: level “item”
+
+Frontmatter gains/retains a `status` (`raw|reviewed|candidate|selected|published`). Existing IDs and any existing status are preserved on refresh.
+
+### Privacy and consent gating
+
+- The indexer can READ everything locally; what’s gated is PUBLISHING/USING it (notes/insights/exports). Items that look sensitive are flagged (financial, identity, medical, credentials) and marked `consent: pending` in the local store. Raw secrets (IBANs, card numbers, balances, account numbers, CNP, passwords) are never written to notes/insights, even after consent.
+- Detection uses file/folder names (with Romanian terms included and user-extendable via `sensitivity.json` next to `vocab.json`), strong patterns (IBAN, Luhn-valid card numbers, valid Romanian CNP), and a cheap PDF text check for invoices. False positives like “Login screen”, “Business card.ai”, or “ID badge mockup.png” are not redacted.
+- Give or deny consent per folder or file:
+
+```bash
+node <skill>/scripts/index.mjs privacy pending
+node <skill>/scripts/index.mjs privacy consent "<root>" "<relative-path>" include|exclude
+```
+
+Flagged items show as a single “flagged, awaiting consent” marker in `_INDEX.md` and in the store map; they never appear in notes or exports until consent is `include`. Invoices you issued are indexed as structured facts (client, date, amount, currency, number) under the same consent gate.
+
+### Moves and conflicts
+
+Nested folder IDs remain scoped to their known paths within a source. To surface likely moves or duplicates across sources without writing nested notes or IDs into originals, inventories now include a privacy-safe folder “signature” (hash of file sizes + known content hashes). `review` reports `identical_folders` when two observed folders in different sources share the same signature. Treat these as leads and verify live locations and intent before proposing changes.
+
+### Obsidian graph hygiene
+
+- V2 root notes add `[[wikilinks]]` only for other notes: child folders' `_INDEX` notes and optional topic/place/period notes (e.g. `[[topic/portrait]]`, `[[place/london]]`, `[[period/2026-03]]`). This keeps the graph readable.
+- Files are listed as plain links or code spans, never as wikilinks, so images and documents do not appear as nodes. Older manual notes that contain file wikilinks are left untouched outside the generated block; consider replacing those with plain links when editing by hand.
+
+### Store map for Obsidian (read-only)
+
+- The local store now contains a generated map for Obsidian under `map/`: one small note per folder (`map/<source>/<relative>/_INDEX.md`) with Dublin Core frontmatter (title, type, date/date_confidence, subject, place, status) plus `source`, `location`, and direct-file counts. A flagged folder shows only a consent marker.
+- Notes are wikilinked up to the parent, down to child folders and across to `topic/`, `place/`, and `period/` notes. Files are listed as plain text (never wikilinks).
+- `map/README.md` links each source’s root. The map is regenerated on every index run (stale notes removed); it is read-only and separate from your originals.
+
 ## Root note and local inventory
 
 Always end each generated or refreshed root `_INDEX.md` with `Created with [TechiStack /index](https://github.com/alexbeltechi/techistack).` after all other sections. The script keeps a single marked credit block and moves it to the bottom on refresh, preserving user prose. Do not put personal links in this footer.

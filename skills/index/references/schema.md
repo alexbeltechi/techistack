@@ -34,6 +34,12 @@ A folder record contains:
 - `files`: direct files, with `name`, `kind: "file"`, `extension`, `size_bytes`, `modified_at`, and optional `sha256`.
 - `file_part` (zero-based) and `file_parts` (total). For very large folders, repeat the folder metadata and split its direct files into consecutive records. Merge `files` in part order when exporting; emit one logical folder row/note per `(source_id, id, path)`, not one per part.
 - Optional `location_status` and `last_location_verified_at` on previously recorded folders not seen during the latest pass.
+- Optional privacy and description fields:
+  - `subject` and `place`: arrays of controlled-vocabulary tags when matched (local `vocab.json`), omitted otherwise.
+  - `status`: one of `raw|reviewed|candidate|selected|published` (default `raw` unless set by frontmatter).
+  - `signature`: `{ method: "file-sizes-hashes/v1", sha256 }` — a privacy-safe content signature (hash of sizes + known per-file hashes), used to spot identical folders across sources without copying sensitive names.
+  - Sensitivity and consent: `sensitivity: "financial"|"identity"|"medical"|"credentials"` on folders/files, and `consent: "pending"|"include"|"exclude"`. Outputs must omit flagged items unless `include`. Raw secrets (IBANs, card numbers, balances, account numbers, CNP, passwords) never appear in notes/insights even after consent.
+  - Per-file redaction by name is limited to strong patterns only (IBAN, Luhn-valid card number, valid CNP, explicit credentials files). Structured hints may appear under `observed_as` (e.g. `{ kind: "invoice", client, date, amount, currency, number }` or `{ kind: "bank_statement", bank, period }`), never account numbers or passwords.
 
 A file's folder relationship comes from the containing folder record. Derive its root-relative path from folder `path` plus filename. No per-file persistent identity is promised. Nested folder IDs persist at known paths within a source; root-only notes cannot establish identity after arbitrary child moves. An explicit move mapping or future content-identity extension would be needed to guarantee that.
 

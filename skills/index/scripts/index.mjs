@@ -37,24 +37,133 @@ function metadata(note,values){
 function mountLabel(root){const parts=root.split(path.sep);return parts[1]==='Volumes'?parts[2]:os.hostname();}
 function fileSummary(files){const c={};for(const f of files)c[f.extension||'(no extension)']=(c[f.extension||'(no extension)']||0)+1;return Object.entries(c).map(([x,n])=>`${n} ${x}`).join(', ')||'No files directly here';}
 function tree(rec,byPath,depth=2,limit=80){const lines=[rec.name+'/'];let clipped=false;function visit(r,prefix,d){if(d>=depth){if(r.children.length)lines.push(prefix+'└── … deeper folders; use the links below');return;}r.children.forEach((name,i)=>{if(lines.length>=limit){clipped=true;return;}const last=i===r.children.length-1;lines.push(prefix+(last?'└── ':'├── ')+clean(name)+'/');const child=byPath.get(r.path==='.'?name:r.path+'/'+name);if(child)visit(child,prefix+(last?'    ':'│   '),d+1);});}visit(rec,'',0);if(clipped)lines.push('… overview shortened; full directory is in the local snapshot');return lines.join('\n');}
+
+// Controlled vocabulary and privacy helpers
+const VOCAB_FILE='vocab.json'; // store-relative
+const SENSITIVITY_FILE='sensitivity.json';
+const CONSENTS_FILE=path.join('privacy','consents.json'); // { schema, consents: { [source_id]: { [relPath]: "include"|"exclude" } } }
+async function readJsonIfExists(p){const raw=await text(p);return raw?JSON.parse(raw):null;}
+async function readVocab(store){
+ const p=path.join(store,VOCAB_FILE);const j=await readJsonIfExists(p);
+ if(!j)return {schema:'techistack-vocabulary/v1',subjects:[],places:[]};
+ const norm=list=>Array.isArray(list)?list:list&&typeof list==='object'?Object.entries(list).map(([tag,aliases])=>({tag,aliases:Array.isArray(aliases)?aliases:[]})):[];return {schema:j.schema||'techistack-vocabulary/v1',subjects:norm(j.subjects),places:norm(j.places)};
+}
+async function readSensitivity(store){
+ const p=path.join(store,SENSITIVITY_FILE);const j=await readJsonIfExists(p);
+ if(j&&j.schema==='techistack-sensitivity/v1')return j;
+ // Default, user can extend/override locally
+ return {schema:'techistack-sensitivity/v1',
+  keywords:{
+    financial:['invoice','factura','facturi','chitanta','bon','extras','extrase','extras de cont','declaratie','impozit','anaf','contabilitate','salariu','fluturas','banca','bank','statement'],
+    identity:['cnp','buletin','pasaport','passport','id','acte','act'],
+    medical:['medical','sanatate','analize','reteta'],
+    credentials:['password','parola','kdbx']
+  },
+  banks:['bt','banca transilvania','bcr','brd','ing','raiffeisen','unicredit','cec','revolut','wise','chase','barclays','hsbc','lloyds','natwest','santander','citibank','citi','bofa','boa']
+ };
+}
+async function readConsents(store){const p=path.join(store,CONSENTS_FILE);const j=await readJsonIfExists(p);return j&&j.schema==='techistack-privacy-consents/v1'?j:{schema:'techistack-privacy-consents/v1',consents:{}};}
+async function writeConsents(store,data){const p=path.join(store,CONSENTS_FILE);await fs.mkdir(path.dirname(p),{recursive:true});await fs.writeFile(p,json(data),{flag:'w'});}
+function tagsFromVocab(vocab,words){
+ const out={subject:[],place:[]};
+ for(const {tag,aliases=[]} of vocab.subjects){const all=[tag,...aliases].map(x=>x.toLowerCase());if(words.some(w=>all.includes(w)))out.subject.push(tag);}
+ for(const {tag,aliases=[]} of vocab.places){const all=[tag,...aliases].map(x=>x.toLowerCase());if(words.some(w=>all.includes(w)))out.place.push(tag);}
+ out.subject=[...new Set(out.subject)].sort();out.place=[...new Set(out.place)].sort();return out;
+}
+const RE_CARD=/\b(?:\d[ -]*?){13,19}\b/; // loose
+function hasIbanLike(name){
+ const s=name.toUpperCase().replace(/-/g,'');
+ return /\b[A-Z]{2}\d{2}(?: ?[A-Z0-9]){10,30}\b/.test(s);
+}
+function luhnValid(digits){const s=digits.replace(/[^\d]/g,'');if(s.length<13||s.length>19)return false;let sum=0;let alt=false;for(let i=s.length-1;i>=0;i--){let n=s.charCodeAt(i)-48;if(alt){n*=2;if(n>9)n-=9;}sum+=n;alt=!alt;}return sum%10===0;}
+function isCNP(s){const m=s.match(/\b\d{13}\b/);if(!m)return false;const c=m[0];const w='279146358279'.split('').map(x=>+x);let sum=0;for(let i=0;i<12;i++)sum+=(+c[i])*w[i];let k=sum%11;if(k===10)k=1;return k===+c[12];}
+function redactFilename(name){const ext=path.extname(name);return {name:`REDACTED${ext}`,redacted:true,reason:'sensitive-number-in-name'};}
+function recognizeBankStatement(name,lex){
+ const base=path.basename(name).toLowerCase();
+ const bank=(lex.banks||[]).find(b=>base.includes(b.toLowerCase()));
+ const m=base.match(/(20\d{2})(?:[-_ ](\d{2}))?(?:[-_ ](\d{2}))?/);
+ if(!bank||!m)return null;const [ ,y,mo,dy]=m;const part=[y,mo,dy].filter(Boolean).join('-');return {kind:'bank_statement',bank,period:part};
+}
+function recognizeInvoice(name){
+ const base=path.basename(name);
+ const m=base.match(/(?:INV(?:OICE)?[-_ ]?)?(\d{4}-\d{2}-\d{2})[-_ ]+([A-Za-z][A-Za-z0-9 &'.-]{1,40})[-_ ]+(\d{1,6}(?:[.,]\d{2})?)[-_ ]*([A-Z]{3})/);
+ if(!m)return null;const [,date,client,amount,currency]=m;const val=parseFloat(amount.replace(',','.'));if(!isFinite(val))return null;return {kind:'invoice',client:client.trim(),date,currency,amount:val};
+}
+function inferDateFromNames(folderName,files){
+ const src=[folderName,...files.map(f=>f.name||'')].join(' ');
+ const iso=src.match(/(20\d{2})[-_ /.]?(\d{2})?[-_ /.]?(\d{2})?/);
+ if(iso){const y=iso[1],m=iso[2],d=iso[3];const date=[y,m,d].filter(Boolean).join('-');return {date,confidence:'inferred'};}return null;
+}
+// Cheap content scan helpers
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+const execFileP=promisify(execFile);
+async function readPdfText(p){
+ try{const {stdout}=await execFileP('pdftotext',['-nopgbrk','-layout',p,'-']);return stdout;}catch{ /* fallback below */ }
+ try{const raw=await fs.readFile(p,'utf8');return raw;}catch{return '';}
+}
+function extractInvoiceFromText(txt){
+ const lower=txt.toLowerCase();
+ if(!/(invoice|factura)/.test(lower))return null;
+ // Date formats
+ const mDate=txt.match(/\b(\d{4}-\d{2}-\d{2}|\d{2}\.\d{2}\.\d{4})\b/);
+ const date=mDate?mDate[1].replace(/(\d{2})\.(\d{2})\.(\d{4})/,'$3-$2-$1'):null;
+ const mAmt=txt.match(/(?:Total(?:\s+de\s+plata)?|Suma|Amount)[^\d]*(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})?)[^\w]?(RON|EUR|USD)?/i);
+ const amount=mAmt?parseFloat(mAmt[1].replace(/\./g,'').replace(',','.')):null;
+ const currency=mAmt?(mAmt[2]||'').toUpperCase()||null:null;
+ const mNr=txt.match(/\b(?:Nr\.?|Number)\s*[:\-]?\s*([A-Za-z0-9\-\/]+)\b/);
+ const number=mNr?mNr[1]:null;
+ if(!date && !amount && !currency && !number)return null;
+ return {kind:'invoice',date:date||null,amount:isFinite(amount)?amount:null,currency:currency||null,number:number||null};
+}
+function classifyLevel(rec,byPath){
+ if(rec.path==='.')return {level:'collection',type:'Collection'};
+ if(rec.children&&rec.children.length)return {level:'series',type:'Collection'};
+ return {level:'item',type:'Collection'};
+}
+function wikiPathForFolder(rel){return (rel==='.'?'':rel.replace(/\\/g,'/'))+(rel==='.'?'':'/')+'_INDEX';}
 function managed(rec,byPath,at){
  const folders=[...byPath.values()], total=folders.reduce((n,r)=>n+r.files.length,0);
  let s=`${START}\n\n## Archive map\n\n\`\`\`text\n${tree(rec,byPath,3,120)}\n\`\`\`\n\nChecked: **${at}** · recursively observed folders: **${folders.length}** · files: **${total}**. Only this selected root receives a note. The tree is shortened for readability; the local JSON contains the full recursive inventory.\n\n`;
  s+='### Folder directory\n\n| Folder | Description / direct file types |\n|---|---|\n';
  const display=folders.filter(r=>r.path!=='.'&&r.path.split('/').length<=3).slice(0,200);
- for(const r of display)s+=`| [${clean(r.path)}](${href(r.path)}/) | ${clean(r.description||fileSummary(r.files))} |\n`;
+ for(const r of display){
+   const gated=(r.consent!=='include')&&r.sensitivity;
+   const desc=gated?'flagged, awaiting consent':(r.description||fileSummary(r.files));
+   s+=`| [${clean(r.path)}](${href(r.path)}/) | ${clean(desc)} |\n`;
+ }
  if(display.length<folders.length-1)s+=`\n${folders.length-1-display.length} deeper/additional folders are listed in the local inventory.\n`;
  s+='\n### Files directly at this root\n\n'+fileSummary(rec.files)+'.\n\n';
- for(const f of rec.files.slice(0,100))s+=`- [${clean(f.name)}](${href(f.name)}) — ${f.size_bytes} bytes\n`;
+ let hidden=0;
+ for(const f of rec.files.slice(0,100)){
+   if(f.sensitivity && f.consent!=='include'){hidden++;continue;}
+   s+=`- [${clean(f.name)}](${href(f.name)}) — ${f.size_bytes} bytes\n`;
+ }
+ if(hidden>0)s+=`\n${hidden} item(s) flagged, awaiting consent.\n`;
  if(rec.files.length>100)s+='\nDirect-file list shortened; all filenames are in the local inventory.\n';
  const skipped=folders.reduce((n,r)=>n+r.skipped.length,0);
- s+=`\nExcluded entries: ${skipped}; individual exclusions and scan errors are recorded in the local JSON. Keep source notes and inventories local unless deliberately reviewed for sharing.\n\n${END}`;
+ s+=`\nExcluded entries: ${skipped}; individual exclusions and scan errors are recorded in the local JSON. Keep source notes and inventories local unless deliberately reviewed for sharing.\n\n`;
+ // Wiki graph: link only notes (folders/topics/places/periods), never files
+ const childLinks=(rec.children||[]).slice(0,200).map(name=>`- [[${(rec.path==='.'?name:rec.path+'/'+name).replace(/\\/g,'/')}/_INDEX]]`).join('\n');
+ const topicLinks=(rec.subject||[]).map(t=>`[[topic/${t}]]`).join(' ');
+ const placeLinks=(rec.place||[]).map(t=>`[[place/${t}]]`).join(' ');
+ const periodLink=rec.date?`[[period/${rec.date.slice(0,7)}]]`:'';
+ s+='### Wiki graph\n\n';
+ if(childLinks)s+=`Children notes:\n\n${childLinks}\n\n`;
+ if(topicLinks||placeLinks||periodLink)s+=`Topics: ${[topicLinks,placeLinks,periodLink].filter(Boolean).join(' ')}\n\n`;
+ s+=`${END}`;
  return s;
 }
 function noteBodyFor(rec,byPath,at){
  let n=rec.original_note;
- const values={id:rec.id,index_updated_at:at,generated_inventory_at:at};
- if(!n){n=metadata('',{schema:'techistack-index/v3',id:rec.id,index_created_at:at,title:rec.name})+`\n# ${clean(rec.name)}\n\n## Context\n\n## Folder context\n\n## Notes\n\n`;}
+ // Dublin Core + minimal IPTC-friendly fields, preserving any existing values
+ const existing={subject:field(n||'','subject'),place:field(n||'','place'),status:field(n||'','status'),date:field(n||'','date'),date_confidence:field(n||'','date_confidence'),type:field(n||'','type')};
+ const classified=classifyLevel(rec,byPath);
+ const values={id:rec.id,index_updated_at:at,generated_inventory_at:at,title:rec.name,type:existing.type||classified.type,status:existing.status||rec.status||'raw'};
+ if(rec.subject?.length && !existing.subject)values.subject=rec.subject;
+ if(rec.place?.length && !existing.place)values.place=rec.place;
+ if(rec.date && !existing.date){values.date=rec.date;values.date_confidence=rec.date_confidence||'inferred';}
+ if(!n){n=metadata('',{schema:'techistack-index/v3',id:rec.id,index_created_at:at,title:rec.name,type:values.type,status:values.status})+`\n# ${clean(rec.name)}\n\n## Context\n\n## Folder context\n\n## Notes\n\n`;}
  else if(!field(n,'id')){
    if(n.startsWith('---'))n=metadata(n,{id:rec.id});
    else n=`---\nschema: techistack-index/v3\nid: ${JSON.stringify(rec.id)}\nindex_created_at: ${JSON.stringify(at)}\n---\n\n`+n;
@@ -130,7 +239,10 @@ async function writeSource(store,source,rows,previous=null){
  const refs=[];let batch=[],size=0;
  async function flush(){if(!batch.length)return;refs.push(await immutable(store,'sources/'+source.source_id+'/chunks',{schema:CHUNK,source_id:source.source_id,folders:batch}));batch=[];size=0;}
  const parents=new Map(rows.map(r=>[r.path,r.id]));
- for(const raw of rows){const r={...raw,kind:'folder',parent_id:raw.parent_id??(raw.path==='.'?null:parents.get(path.posix.dirname(raw.path))??null)};const n=Math.max(1,Math.ceil(r.files.length/FILES_PER_PART));for(let i=0;i<n;i++){
+ for(const raw of rows){
+  const r={...raw,kind:'folder',parent_id:raw.parent_id??(raw.path==='.'?null:parents.get(path.posix.dirname(raw.path))??null)};
+  const sigInput=r.files.map(f=>[f.size_bytes||0,f.sha256||null]);r.signature={method:'file-sizes-hashes/v1',sha256:sha(JSON.stringify(sigInput))};
+  const n=Math.max(1,Math.ceil(r.files.length/FILES_PER_PART));for(let i=0;i<n;i++){
    const part={...r,files:r.files.slice(i*FILES_PER_PART,(i+1)*FILES_PER_PART),file_part:i,file_parts:n};
    const bytes=Buffer.byteLength(json(part));if(batch.length&&size+bytes>CHUNK_BYTES)await flush();batch.push(part);size+=bytes;
  }}
@@ -151,6 +263,36 @@ async function prune(store,entry){
   const body=await text(p);if(sha(body)+'.json'!==name)continue; // retain modified or unknown files
   const d=JSON.parse(body);if(d.source_id===entry.source_id&&[SOURCE,CHUNK].includes(d.schema))await fs.unlink(p);
  }
+}
+// --- Obsidian minimal config: merge-only helper ---
+async function ensureObsidianConfig(store){
+ const dir=path.join(store,'.obsidian');await fs.mkdir(dir,{recursive:true});
+ // app.json: userIgnoreFilters merge
+ const appPath=path.join(dir,'app.json');let app={};
+ try{const raw=await fs.readFile(appPath,'utf8');app=JSON.parse(raw);}catch{}
+ const desiredIgnores=['migrations/','sources/','privacy/','snapshots/','reviews/'];
+ const existingIgnores=Array.isArray(app.userIgnoreFilters)?app.userIgnoreFilters:[];
+ const mergedIgnores=[...new Set([...existingIgnores,...desiredIgnores])];
+ if(mergedIgnores.length)app.userIgnoreFilters=mergedIgnores;
+ await fs.writeFile(appPath,json(app),{flag:'w'});
+ // graph.json: color groups merge
+ const graphPath=path.join(dir,'graph.json');let graph={};
+ try{const raw=await fs.readFile(graphPath,'utf8');graph=JSON.parse(raw);}catch{}
+ const wantGroups=[
+  {query:'path:map/',color:'#6aa84f'},
+  {query:'path:topic/',color:'#3d85c6'},
+  {query:'path:place/',color:'#674ea7'},
+  {query:'path:period/',color:'#e69138'}
+ ];
+ const groups=Array.isArray(graph.groups)?graph.groups:[];
+ for(const g of wantGroups){if(!groups.some(x=>String(x.query)===g.query))groups.push(g);}
+ if(groups.length)graph.groups=groups;
+ // Hide unresolved and exclude raw data from graph search
+ graph.options=graph.options||{};
+ graph.options.hideUnresolved=true;
+ const baseSearch='-path:migrations/ -path:reviews/ -path:sources/';
+ graph.search=typeof graph.search==='string'&&graph.search.trim().length?`${graph.search} ${baseSearch}`:baseSearch;
+ await fs.writeFile(graphPath,json(graph),{flag:'w'});
 }
 async function migrate(store,db){
  if(db.schema===MANIFEST)return db;
@@ -180,6 +322,62 @@ function changeReport(previous,rows){
  for(const r of byPath.values())add('not_observed_folders',r.path);
  return report;
 }
+function safeLabel(label){return String(label||'source').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'')||'source';}
+async function generateMap(store,manifest){
+ // Rebuild the map completely
+ const base=path.join(store,'map');await fs.rm(base,{recursive:true,force:true});await fs.mkdir(base,{recursive:true});
+ let hub='# Indexed sources\n\n';
+ for(const entry of manifest.sources){
+   const d=await descriptor(store,entry);
+   const rows=await loadFolders(store,entry);
+   const rootRow=rows.find(r=>r.path==='.');
+   const label=entry.label||d.label||'Source';
+   const labelSafe=safeLabel(label);
+   const sourceDir=path.join(base,labelSafe);await fs.mkdir(sourceDir,{recursive:true});
+   hub+=`- [[map/${labelSafe}/_INDEX]] (${label})\n`;
+   // Create per-folder notes
+   const byPath=new Map(rows.map(r=>[r.path,r]));
+   for(const r of rows){
+     const dir=path.join(sourceDir, r.path==='.'?'':r.path);await fs.mkdir(dir,{recursive:true});
+     const p=path.join(dir,'_INDEX.md');
+     const parentPath=r.path==='.'?null:path.posix.dirname(r.path);
+     const at=entry.snapshot_at||manifest.updated_at||new Date().toISOString();
+     const front={
+       schema:'techistack-map-index/v1',
+       title:r.name,
+       type:'Collection',
+       date:r.date||null,
+       date_confidence:r.date_confidence||null,
+       subject:r.subject||[],
+       place:r.place||[],
+       status:r.status||'raw',
+       source:label,
+       location:path.join(entry.last_known_location||'(unmounted)', r.path==='.'?'':r.path),
+       files:(r.files||[]).length
+     };
+     const childLinks=(r.children||[]).map(name=>`- [[${(r.path==='.'?name:r.path+'/'+name).replace(/\\/g,'/')}/_INDEX]]`).join('\n');
+     const topicLinks=(front.subject||[]).map(t=>`[[topic/${t}]]`).join(' ');
+     const placeLinks=(front.place||[]).map(t=>`[[place/${t}]]`).join(' ');
+     const periodLink=front.date?`[[period/${front.date.slice(0,7)}]]`:'';
+     const flagged=(r.sensitivity && r.consent!=='include');
+     let body=`# ${clean(r.name)}\n\nIndexed: ${at}\n\n`;
+     if(flagged)body+='This folder is flagged, awaiting consent.\n\n';
+     body+='## Links\n\n';
+     if(parentPath && byPath.has(parentPath))body+=`Parent: [[${parentPath}/_INDEX]]\n\n`;
+     if(childLinks)body+=`Children:\n\n${childLinks}\n\n`;
+     const topics=[topicLinks,placeLinks,periodLink].filter(Boolean).join(' ');
+     if(topics)body+=`Topics: ${topics}\n\n`;
+     // Files are never wikilinked
+     if(!flagged){
+       const list=(r.files||[]).slice(0,50).map(f=>`- \`${f.name}\` — ${f.size_bytes} bytes`).join('\n');
+       body+=`## Files\n\n${list || 'No files directly here.'}\n\n`;
+     }
+     const fm='---\n'+Object.entries(front).map(([k,v])=>`${k}: ${JSON.stringify(v)}`).join('\n')+'\n---\n\n';
+     await fs.writeFile(p, fm+body, {flag:'w'});
+   }
+ }
+ const hubPath=path.join(base,'README.md');await fs.writeFile(hubPath,hub+'\n',{flag:'w'});
+}
 async function run(rootArg,storeArg,{dryRun=false,hash=false,label}={}){
  const root=await fs.realpath(rootArg);let store=path.resolve(storeArg),ancestor=store,tail=[];
  while(!await exists(ancestor)){tail.unshift(path.basename(ancestor));ancestor=path.dirname(ancestor);}store=path.join(await fs.realpath(ancestor),...tail);
@@ -195,6 +393,10 @@ async function run(rootArg,storeArg,{dryRun=false,hash=false,label}={}){
  const sourceId=sha(rootId+'\0'+root).slice(0,20),prevEntry=db.sources.find(s=>s.source_id===sourceId);
  const previous=await loadFolders(store,prevEntry),prevByPath=new Map(previous.map(r=>[r.path,r]));
  const scopedContext=annotations(original);
+ const vocab=await readVocab(store);
+ const sensitivityLex=await readSensitivity(store);
+ const consents=await readConsents(store);
+ const consentMap=new Map(Object.entries(consents.consents[sourceId]||{}));
  async function walk(abs,rel,parentId,inherited,labels){
   let entries;try{entries=await fs.readdir(abs,{withFileTypes:true});}catch(e){error(rel,'list',e);return;}
   entries.sort((a,b)=>a.name.localeCompare(b.name));
@@ -203,12 +405,60 @@ async function run(rootArg,storeArg,{dryRun=false,hash=false,label}={}){
   const context=scopedContext.has(rel)?scopedContext.get(rel):ownContext(legacy)||old?.context||'';
   const carried={origin_labels:old?.carried_context?.origin_labels||[...labels,path.basename(abs)],confirmed_context:[...inherited]};
   const chain=[...inherited];if(context)chain.push({source_id:id,source_title:path.basename(abs),text:context});
-  const rec={id,kind:'folder',parent_id:parentId,path:rel,name:path.basename(abs),description:scopedContext.has(rel)?context:field(legacy,'summary')||context.split('\n\n')[0]||old?.description||'',context,carried_context:carried,children:[],files:[],skipped:[]};folders.push(rec);
+  const rec={id,kind:'folder',parent_id:parentId,path:rel,name:path.basename(abs),description:scopedContext.has(rel)?context:field(legacy,'summary')||context.split('\n\n')[0]||old?.description||'',context,carried_context:carried,children:[],files:[],skipped:[]};
+  // tags from controlled vocabulary and status/date inference
+  const words=[...new Set([...(rel==='.'?[]:rel.split('/')),path.basename(abs)].map(s=>s.toLowerCase()))];
+  const tagPick=tagsFromVocab(vocab,words);
+  if(tagPick.subject.length)rec.subject=tagPick.subject;
+  if(tagPick.place.length)rec.place=tagPick.place;
+  rec.status=field(legacy,'status')||old?.status||'raw';
+  const dateGuess=inferDateFromNames(path.basename(abs),[]);
+  if(dateGuess){rec.date=dateGuess.date;rec.date_confidence=dateGuess.confidence;}
+  // Folder sensitivity from name keywords
+  const folderName=path.basename(abs).toLowerCase().replace(/[-_]/g,' ');
+  const sensKw=sensitivityLex.keywords||{};
+  const isFinancial=(sensKw.financial||[]).some(k=>folderName.includes(k.toLowerCase()))||(sensitivityLex.banks||[]).some(b=>folderName.includes(b.toLowerCase()));
+  if(isFinancial){rec.sensitivity='financial';rec.consent=(consentMap.get(rel||'.')||'pending');}
+  folders.push(rec);
   for(const ent of entries){if(ent.name==='_INDEX.md')continue;const dest=path.join(abs,ent.name);
    if(ent.name.startsWith('.')||SKIP.has(ent.name)||generated.test(ent.name)||/\.(?:app|photoslibrary|lrdata|lrlibrary)$/i.test(ent.name)||inside(dest,store)){rec.skipped.push({name:ent.name,reason:'system, dependency, generated output, package, or local store'});continue;}
    if(ent.isSymbolicLink()){rec.skipped.push({name:ent.name,reason:'symbolic link; not followed'});continue;}
-   if(ent.isDirectory()){rec.children.push(ent.name);await walk(dest,rel==='.'?ent.name:rel+'/'+ent.name,id,chain,carried.origin_labels);}
-   else if(ent.isFile()){try{const st=await fs.lstat(dest);if(!st.isFile()||st.isSymbolicLink())throw Error('Entry changed during scan');rec.files.push({name:ent.name,kind:'file',extension:path.extname(ent.name).toLowerCase(),size_bytes:st.size,modified_at:st.mtime.toISOString()});}catch(e){error(path.posix.join(rel,ent.name),'stat',e);}}
+   if(ent.isDirectory()){
+     const relative=rel==='.'?ent.name:rel+'/'+ent.name;
+     rec.children.push(ent.name);await walk(dest,relative,id,chain,carried.origin_labels);
+   }
+   else if(ent.isFile()){
+     try{
+       const st=await fs.lstat(dest);if(!st.isFile()||st.isSymbolicLink())throw Error('Entry changed during scan');
+       let fileRec={name:ent.name,kind:'file',extension:path.extname(ent.name).toLowerCase(),size_bytes:st.size,modified_at:st.mtime.toISOString()};
+       // False-positive safe redaction: only on real secrets in the name
+       const nameHasIban=hasIbanLike(ent.name);
+       const nameHasCard=luhnValid((ent.name.match(RE_CARD)||[''])[0]||'');
+       const nameHasCnp=isCNP(ent.name);
+       const isCredFile=/\b(passwords?\.txt|parola|\.kdbx)\b/i.test(ent.name);
+       if(nameHasIban||nameHasCard||nameHasCnp||isCredFile){const r=redactFilename(ent.name);fileRec={...fileRec,name:r.name,redacted:true};}
+       // Sensitivity categories by heuristics
+       if(nameHasIban||nameHasCard)fileRec.sensitivity='financial';
+       else if(nameHasCnp)fileRec.sensitivity='identity';
+       else if(isCredFile)fileRec.sensitivity='credentials';
+       else {
+         const nm=ent.name.toLowerCase();
+         if((sensKw.financial||[]).some(k=>nm.includes(k.toLowerCase()))||(sensitivityLex.banks||[]).some(b=>nm.includes(b.toLowerCase())))fileRec.sensitivity='financial';
+       }
+       if(fileRec.sensitivity)fileRec.consent=(consentMap.get((rel==='.'?'':rel+'/')+ent.name)||consentMap.get(rel||'.')||'pending');
+       // Structured facts from name
+       const bank=recognizeBankStatement(ent.name,sensitivityLex);
+       let inv=recognizeInvoice(ent.name);
+       // Optional PDF text read for invoices when name doesn't match
+       if(!inv && fileRec.extension==='.pdf' && st.size<=2*1024*1024 && /(invoice|factura)/i.test(ent.name)) {
+         const txt=await readPdfText(dest);
+         const info=extractInvoiceFromText(txt);
+         if(info)inv=info;
+       }
+       if(inv){fileRec.observed_as=inv;}
+       rec.files.push(fileRec);
+     }catch(e){error(path.posix.join(rel,ent.name),'stat',e);}
+   }
   }
  }
  await walk(root,'.',null,[],[]);if(!folders.length)throw Error('Root could not be indexed');
@@ -231,6 +481,8 @@ async function run(rootArg,storeArg,{dryRun=false,hash=false,label}={}){
   const entry=await writeSource(store,source,[...folders,...unobserved],prior?.latest||null);
   manifest.sources=manifest.sources.filter(s=>s.source_id!==sourceId);manifest.sources.push(entry);manifest.updated_at=at;
   await atomic(path.join(store,'index.json'),json(manifest));
+  await ensureObsidianConfig(store);
+  await generateMap(store,manifest);
   await prune(store,entry);
   if(!await exists(path.join(store,'.gitignore')))await fs.writeFile(path.join(store,'.gitignore'),'*\n',{flag:'wx'});
   summary.coverage=source.coverage;summary.latest=refPath(store,entry.latest);summary.previous=entry.previous?refPath(store,entry.previous):null;
@@ -253,7 +505,21 @@ async function review(store){
  const db=await readStore(store),sources=[];
  // Optional cross-source review holds the selected inventories in memory; normal search is chunked.
  for(const e of db.sources){const d=await descriptor(store,e);sources.push({...e,conflicts:d.conflicts||[],folders:(await loadFolders(store,e)).filter(r=>!r.location_status?.startsWith('not-observed'))});}
- return {candidate_duplicates:candidates(sources),identical_content:hashMatches(sources),conflicts:sources.flatMap(s=>(s.conflicts||[]).map(c=>({source:s.label,...c}))),note:'Candidates only; verify live locations, dependencies, and backup intent before proposing changes.'};
+ // Folder-signature matches (potential moves or duplicates across sources)
+ const bySig=new Map();
+ for(const s of sources)for(const r of s.folders){const k=r.signature?.sha256; if(!k)continue; const row={source:s.label,source_id:s.source_id,path:path.join(s.last_known_location,r.path),folder_id:r.id,signature:k}; if(!bySig.has(k))bySig.set(k,[]); bySig.get(k).push(row);}
+ const identical_folders=[...bySig.values()].filter(g=>g.length>1);
+ // Signature conflicts: same relative path seen with different signatures across sources
+ const byRel=new Map();
+ for(const s of sources)for(const r of s.folders){const k=r.path;const v={source:s.label,signature:r.signature?.sha256||null,path:path.join(s.last_known_location,r.path)};if(!byRel.has(k))byRel.set(k,[]);byRel.get(k).push(v);}
+ const signature_conflicts=[...byRel.entries()].map(([rel,rows])=>({rel,rows:[...new Map(rows.map(x=>[x.path,x])).values()]})).filter(x=>{const sigs=[...new Set(x.rows.map(r=>r.signature))];return sigs.filter(Boolean).length>1;});
+ // Pending sensitivity
+ const flagged_pending=[];
+ for(const s of sources)for(const r of s.folders){
+   if(r.sensitivity && r.consent!=='include')flagged_pending.push({path:path.join(s.last_known_location,r.path),kind:'folder',sensitivity:r.sensitivity});
+   for(const f of r.files)if(f.sensitivity && f.consent!=='include')flagged_pending.push({path:path.join(s.last_known_location,r.path,f.name),kind:'file',sensitivity:f.sensitivity});
+ }
+ return {candidate_duplicates:candidates(sources),identical_content:hashMatches(sources),identical_folders,signature_conflicts,flagged_pending,conflicts:sources.flatMap(s=>(s.conflicts||[]).map(c=>({source:s.label,...c}))),note:'Candidates only; verify live locations, dependencies, and backup intent before proposing changes.'};
 }
 export {run,readStore,loadFolders,find,review,writeSource};
 async function main(){
@@ -264,7 +530,39 @@ async function main(){
  if(cmd==='run'){if(rest.length!==1)throw Error('run requires one folder');console.log(json(await run(path.resolve(rest[0]),store,opts)));}
  else if(cmd==='find'){if(!rest.length)throw Error('find requires search terms');console.log(json(await find(store,rest.map(x=>x.toLowerCase()))));}
  else if(cmd==='review')console.log(json(await review(store)));
- else throw Error('Usage: index.mjs run <root> [--store <local folder>] [--dry-run] [--hash] [--label <name>] | find <terms...> [--store <folder>] | review [--store <folder>]');
+ else if(cmd==='privacy'){
+   const sub=rest.shift();
+  if(sub==='consent'){
+    if(rest.length<3)throw Error('privacy consent requires <root> <relative-path> include|exclude');
+     const root=path.resolve(rest[0]);const real=await fs.realpath(root);
+     const original=await text(path.join(real,'_INDEX.md'));
+     const rootId=field(original,'id')||crypto.randomUUID();
+    const sourceId=sha(rootId+'\0'+real).slice(0,20);
+    const consents=await readConsents(store);consents.consents[sourceId]=consents.consents[sourceId]||{};
+    const rel=rest[1];const decision=rest[2];if(path.isAbsolute(rel))throw Error('relative-path must be relative to the selected root');
+    if(!['include','exclude'].includes(decision))throw Error('decision must be include|exclude');
+    consents.consents[sourceId][rel]=decision;await writeConsents(store,consents);console.log(json({ok:true,consent:{source_id:sourceId,path:rel,decision}}));
+  }else if(sub==='pending'){
+    console.log(json((await review(store)).flagged_pending));
+  }else throw Error('Usage: privacy consent <root> <relative-path> include|exclude | privacy pending');
+ } else if(cmd==='verify-copy'){
+   if(rest.length!==2)throw Error('verify-copy requires <source-path> <dest-path>');
+   const [src,dst]=rest.map(p=>path.resolve(p));
+   async function list(dir,base){const out=new Map();const st=await fs.lstat(dir);if(st.isFile()){const rel=path.relative(base,dir)||path.basename(dir);const sha256=await digest(dir);out.set(rel,{size:st.size,sha256});return out;}for(const e of await fs.readdir(dir,{withFileTypes:true})){const p=path.join(dir,e.name);if(e.isDirectory()){for(const [k,v] of await list(p,base))out.set(k,v);}else if(e.isFile()){const st2=await fs.lstat(p);const sha256=await digest(p);out.set(path.relative(base,p),{size:st2.size,sha256});}}return out;}
+   const A=await list(src,src),B=await list(dst,dst);
+   const missing=[],extra=[],different=[];
+   for(const [k,a] of A){const b=B.get(k);if(!b)missing.push(k);else if(a.sha256!==b.sha256)different.push(k);}
+   for(const [k] of B)if(!A.has(k))extra.push(k);
+   const safe_to_delete=missing.length===0&&extra.length===0&&different.length===0;
+   const at=new Date().toISOString();
+   const report={at,source:src,destination:dst,missing,extra,different,safe_to_delete};
+   const dir=path.join(store,'verifications');await fs.mkdir(dir,{recursive:true});
+   const ref=path.join('verifications',sha(json(report)).slice(0,16)+'-'+at.replace(/[:.]/g,'-')+'.json');await fs.writeFile(path.join(store,ref),json(report),{flag:'wx'});
+   // Record move event
+   const manifest=await readStore(store);manifest.events=manifest.events||[];manifest.events.push({type:'move_verification',at,source:src,destination:dst,report:ref,safe_to_delete});await atomic(path.join(store,'index.json'),json(manifest));
+   console.log(json({...report,report_ref:ref}));
+ }
+ else throw Error('Usage: index.mjs run <root> [--store <local folder>] [--dry-run] [--hash] [--label <name>] | find <terms...> [--store <folder>] | review [--store <folder>] | privacy consent <root> <relative-path> include|exclude [--store <folder>] | privacy pending [--store <folder>] | verify-copy <source-path> <dest-path> [--store <folder>]');
 }
 const invokedPath=process.argv[1]?await fs.realpath(process.argv[1]).catch(()=>null):null;
 if(invokedPath&&invokedPath===await fs.realpath(fileURLToPath(import.meta.url)))main().catch(e=>{console.error('index: '+e.message);process.exitCode=1;});

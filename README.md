@@ -62,6 +62,15 @@ The default is the executing user's `~/Documents/Index`, never the maintainer's 
 
 Moving a child folder alone does not carry the root note. Log moves and refresh the affected roots; report stale/disconnected locations as last known. Duplicate candidates are evidence for review, not permission to delete. See the [JSON schema](skills/index/references/schema.md) for future exports.
 
+Root note frontmatter now follows Dublin Core names (`title`, `type`, `date` + `date_confidence`, `subject`, `place`, `status`). Tags are matched from a local controlled vocabulary (`~/Documents/Index/vocab.json`). Bank/identity-sensitive details never appear in notes or JSON: suspicious filenames are redacted, while invoices and bank statements are recorded only as structured facts (client/date/amount/currency; bank/period).
+
+Obsidian (optional): when the local store is opened as a vault, `/index` writes or merges a minimal `.obsidian` config inside the store (never in your work folders):
+
+- `.obsidian/app.json`: adds `userIgnoreFilters` for raw data folders (`migrations/`, `sources/`, `privacy/`, `snapshots/`, `reviews/`), merged with your existing settings.
+- `.obsidian/graph.json`: sets `hideUnresolved: true`, a `search` that excludes raw data (`-path:migrations/ -path:reviews/ -path:sources/`), and color groups for note types — the generated `map/` (folders/sources), and `topic/`, `place/`, `period/` pages — merged with any existing groups. Files are never wikilinked by `/index`, so the graph stays a readable map of structure and topics.\n\nObsidian is optional and not required to use TechiStack; configs are merged safely and any existing keys are preserved.
+
+Store map (read-only): the local store now contains a generated map under `map/`, one small note per folder per source (`map/<source>/<relative>/_INDEX.md`) with DC frontmatter and wikilinks up/down/across. A `map/README.md` links each source. The map regenerates on every run and works even when drives are unmounted, so your Obsidian vault shows the tree across all drives without touching originals.
+
 ## how /curate works
 
 every run is a new curation, a folder next to your work:

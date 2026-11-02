@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.11.1 — 2026-11-02
+
+- `/index` root note frontmatter now follows Dublin Core names: `title`, `type` (Collection), `date` with `date_confidence` (`exact|inferred|guess`), `subject`, `place`, and a `status` lifecycle (`raw|reviewed|candidate|selected|published`). Existing values are preserved on refresh.
+- Controlled vocabulary for tags: local `vocab.json` (subjects/places with aliases). Tags are matched from path words; the vocabulary lives in the local store, not this repo.
+- Privacy protections:
+  - Sensitive folders (finance/bank/tax/medical/passwords/contracts, etc.) are flagged and skipped until approved per source (`privacy approve <root> <relative-path>`).
+  - Bank/identity-sensitive details are never copied: suspicious filenames are redacted in notes and JSON. Issued invoices and bank statements are recorded only as structured facts (client/date/amount/currency; bank/period), without account numbers.
+- Inventory rows include a privacy-safe folder “signature” (hash of file sizes + available content hashes). `review` reports `identical_folders` across sources (move/duplicate leads) alongside existing duplicate groups and conflicts.
+- Obsidian graph hygiene: the generated block adds `[[wikilinks]]` only for other notes — child folders’ `_INDEX` notes and optional topic/place/period nodes — never for files. Files are plain links/code spans. This keeps the graph readable and avoids one-node-per-image.
+- Optional Obsidian config in the local store: merge a minimal `.obsidian/app.json` with `userIgnoreFilters` for raw data folders and a `.obsidian/graph.json` with color groups for `_INDEX`, `topic/`, `place/`, and `period/` notes. Existing keys are preserved; tests cover safe merge behavior.
+- Docs: `skills/index/SKILL.md`, schema references, and README updated.
+
+Patch updates in 0.11.1:
+- Privacy model changed to consent gating: the indexer reads everything locally; flagged items (`sensitivity`) are marked `consent: pending` and omitted from notes/insights/exports until consent is `include`. Strong patterns only for redaction (IBAN, Luhn card, valid Romanian CNP, credentials files). Romanian terms and banks moved to a local, user-extendable `sensitivity.json`. Cheap PDF text parsing detects invoices (Romanian fields supported). CLI: `privacy pending` and `privacy consent <root> <relative-path> include|exclude`.
+- Store map for Obsidian: `map/` holds one small note per folder per source, wikilinked up/down/across, plus a `map/README.md` hub. Regenerated every run and works when drives are unmounted.
+- Obsidian graph config: `hideUnresolved: true`, `search` excludes raw data paths, color group for `path:map/`.
+- `verify-copy <source-path> <dest-path>`: compares by size + SHA-256, writes a dated report into the store, and records a move-verification event in the manifest. `review` now reports `signature_conflicts` for the same relative path with different signatures across sources.
+
 ## 0.10.1 — 2026-11-01
 
 - Root Index notes now end with a single linked “Created with TechiStack /index” credit, preserved at the bottom after refreshes and manual edits.
