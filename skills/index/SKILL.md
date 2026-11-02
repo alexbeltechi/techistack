@@ -67,17 +67,18 @@ This version classifies folders heuristically for description/export:
 
 Frontmatter gains/retains a `status` (`raw|reviewed|candidate|selected|published`). Existing IDs and any existing status are preserved on refresh.
 
-### Privacy and approvals
+### Privacy and consent gating
 
-- Folders with names like `finance`, `bank`, `tax`, `medical`, `passwords`, `contracts`, etc. are flagged as privacy-sensitive and skipped by default.
-- Approve a sensitive path once per source to include it:
+- The indexer can READ everything locally; what’s gated is PUBLISHING/USING it (notes/insights/exports). Items that look sensitive are flagged (financial, identity, medical, credentials) and marked `consent: pending` in the local store. Raw secrets (IBANs, card numbers, balances, account numbers, CNP, passwords) are never written to notes/insights, even after consent.
+- Detection uses file/folder names (with Romanian terms included and user-extendable via `sensitivity.json` next to `vocab.json`), strong patterns (IBAN, Luhn-valid card numbers, valid Romanian CNP), and a cheap PDF text check for invoices. False positives like “Login screen”, “Business card.ai”, or “ID badge mockup.png” are not redacted.
+- Give or deny consent per folder or file:
 
 ```bash
-node <skill>/scripts/index.mjs privacy approve "<root>" "<relative-path>"
-node <skill>/scripts/index.mjs privacy list
+node <skill>/scripts/index.mjs privacy pending
+node <skill>/scripts/index.mjs privacy consent "<root>" "<relative-path>" include|exclude
 ```
 
-Only approvals are written locally (e.g. `privacy/approvals.json` in the store).
+Flagged items show as a single “flagged, awaiting consent” marker in `_INDEX.md` and in the store map; they never appear in notes or exports until consent is `include`. Invoices you issued are indexed as structured facts (client, date, amount, currency, number) under the same consent gate.
 
 ### Moves and conflicts
 
@@ -87,6 +88,12 @@ Nested folder IDs remain scoped to their known paths within a source. To surface
 
 - V2 root notes add `[[wikilinks]]` only for other notes: child folders' `_INDEX` notes and optional topic/place/period notes (e.g. `[[topic/portrait]]`, `[[place/london]]`, `[[period/2026-03]]`). This keeps the graph readable.
 - Files are listed as plain links or code spans, never as wikilinks, so images and documents do not appear as nodes. Older manual notes that contain file wikilinks are left untouched outside the generated block; consider replacing those with plain links when editing by hand.
+
+### Store map for Obsidian (read-only)
+
+- The local store now contains a generated map for Obsidian under `map/`: one small note per folder (`map/<source>/<relative>/_INDEX.md`) with Dublin Core frontmatter (title, type, date/date_confidence, subject, place, status) plus `source`, `location`, and direct-file counts. A flagged folder shows only a consent marker.
+- Notes are wikilinked up to the parent, down to child folders and across to `topic/`, `place/`, and `period/` notes. Files are listed as plain text (never wikilinks).
+- `map/README.md` links each source’s root. The map is regenerated on every index run (stale notes removed); it is read-only and separate from your originals.
 
 ## Root note and local inventory
 

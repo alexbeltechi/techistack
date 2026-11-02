@@ -38,7 +38,8 @@ A folder record contains:
   - `subject` and `place`: arrays of controlled-vocabulary tags when matched (local `vocab.json`), omitted otherwise.
   - `status`: one of `raw|reviewed|candidate|selected|published` (default `raw` unless set by frontmatter).
   - `signature`: `{ method: "file-sizes-hashes/v1", sha256 }` — a privacy-safe content signature (hash of sizes + known per-file hashes), used to spot identical folders across sources without copying sensitive names.
-  - Per-file redaction: files whose names contain bank- or identity-sensitive patterns are stored as `REDACTED.<ext>` with `redacted: true`. Structured hints may appear under `observed_as` (e.g. `{ kind: "invoice", client, date, amount, currency }` or `{ kind: "bank_statement", bank, period }`), never account numbers or passwords.
+  - Sensitivity and consent: `sensitivity: "financial"|"identity"|"medical"|"credentials"` on folders/files, and `consent: "pending"|"include"|"exclude"`. Outputs must omit flagged items unless `include`. Raw secrets (IBANs, card numbers, balances, account numbers, CNP, passwords) never appear in notes/insights even after consent.
+  - Per-file redaction by name is limited to strong patterns only (IBAN, Luhn-valid card number, valid CNP, explicit credentials files). Structured hints may appear under `observed_as` (e.g. `{ kind: "invoice", client, date, amount, currency, number }` or `{ kind: "bank_statement", bank, period }`), never account numbers or passwords.
 
 A file's folder relationship comes from the containing folder record. Derive its root-relative path from folder `path` plus filename. No per-file persistent identity is promised. Nested folder IDs persist at known paths within a source; root-only notes cannot establish identity after arbitrary child moves. An explicit move mapping or future content-identity extension would be needed to guarantee that.
 

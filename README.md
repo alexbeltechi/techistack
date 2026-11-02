@@ -67,7 +67,9 @@ Root note frontmatter now follows Dublin Core names (`title`, `type`, `date` + `
 Obsidian (optional): when the local store is opened as a vault, `/index` writes or merges a minimal `.obsidian` config inside the store (never in your work folders):
 
 - `.obsidian/app.json`: adds `userIgnoreFilters` for raw data folders (`migrations/`, `sources/`, `privacy/`, `snapshots/`, `reviews/`), merged with your existing settings.
-- `.obsidian/graph.json`: adds color groups for note types — `_INDEX` notes, and `topic/`, `place/`, `period/` pages — merged with any existing groups. Files are never wikilinked by `/index`, so the graph stays a readable map of structure and topics.\n\nObsidian is optional and not required to use TechiStack; configs are merged safely and any existing keys are preserved.
+- `.obsidian/graph.json`: sets `hideUnresolved: true`, a `search` that excludes raw data (`-path:migrations/ -path:reviews/ -path:sources/`), and color groups for note types — the generated `map/` (folders/sources), and `topic/`, `place/`, `period/` pages — merged with any existing groups. Files are never wikilinked by `/index`, so the graph stays a readable map of structure and topics.\n\nObsidian is optional and not required to use TechiStack; configs are merged safely and any existing keys are preserved.
+
+Store map (read-only): the local store now contains a generated map under `map/`, one small note per folder per source (`map/<source>/<relative>/_INDEX.md`) with DC frontmatter and wikilinks up/down/across. A `map/README.md` links each source. The map regenerates on every run and works even when drives are unmounted, so your Obsidian vault shows the tree across all drives without touching originals.
 
 ## how /curate works
 

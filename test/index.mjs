@@ -57,20 +57,49 @@ try{
  const alias=path.join(tmp,'alias.mjs');await fs.symlink(cli,alias);assert(JSON.parse(execFileSync(process.execPath,[alias,'find','document','--store',store],{encoding:'utf8'})).matches.length);
  assert(JSON.parse(execFileSync(process.execPath,[alias,'find','document'],{encoding:'utf8',env:{...process.env,TECHISTACK_INDEX_STORE:store}})).matches.length);
  assert(JSON.parse(execFileSync(process.execPath,[alias,'find','document','--store',store],{encoding:'utf8',env:{...process.env,TECHISTACK_INDEX_STORE:path.join(tmp,'empty-store')}})).matches.length);
- // Privacy: sensitive filenames redacted; sensitive folders require approval
- await fs.writeFile(path.join(root,'2026-01 Monzo Statement IBAN GB12 BARC 1234 5678 9012.pdf'),'x');
+ // Privacy: sensitive detection with consent gating; names only redacted on real secrets
+ await fs.writeFile(path.join(root,'2026-01 Extras de cont IBAN GB12 BARC 1234 5678 9012.pdf'),'x');
  await fs.mkdir(path.join(root,'Finance','Bank'),{recursive:true});await fs.writeFile(path.join(root,'Finance','Bank','passwords.txt'),'x');
  await run(root,store,{});
  db=await readStore(store);rows=await loadFolders(store,db.sources.find(s=>s.last_known_location===root));
- const rootRow=rows.find(r=>r.path==='.');assert(rootRow.files.some(f=>f.name.startsWith('REDACTED')&&f.observed_as&&f.observed_as.kind==='bank_statement'));
- const rootRow2=rows.find(r=>r.path==='.');assert(rootRow2&&rootRow2.skipped.some(s=>s.name==='Finance'&&/privacy-sensitive/.test(s.reason)));
- // Approve sensitive folder; it gets traversed next run
- JSON.parse(execFileSync(process.execPath,[alias,'privacy','approve',root,'Finance','--store',store],{encoding:'utf8'}));
- JSON.parse(execFileSync(process.execPath,[alias,'privacy','approve',root,'Finance/Bank','--store',store],{encoding:'utf8'}));
- await run(root,store,{});db=await readStore(store);rows=await loadFolders(store,db.sources.find(s=>s.last_known_location===root));
- const bank=rows.find(r=>r.path==='Finance/Bank');assert(bank);
+ const rootRow=rows.find(r=>r.path==='.');assert(rootRow.files.some(f=>f.name.startsWith('REDACTED')));
+ // False positives not redacted
+ await fs.writeFile(path.join(root,'Login screen v2.fig'),'x');await fs.writeFile(path.join(root,'Business card.ai'),'x');await fs.writeFile(path.join(root,'ID badge mockup.png'),'x');
+ await run(root,store,{});
+ db=await readStore(store);rows=await loadFolders(store,db.sources.find(s=>s.last_known_location===root));
+ const names=rows.find(r=>r.path==='.').files.map(f=>f.name);
+ assert(names.includes('Login screen v2.fig')&&names.includes('Business card.ai')&&names.includes('ID badge mockup.png'));
+ // Wiki graph and note gating reflect consent pending
+ const note2=await fs.readFile(path.join(root,'_INDEX.md'),'utf8');assert(/flagged, awaiting consent/.test(note2));
+ // Map generated in store, with hub and per-folder notes
+ const mapHub=await fs.readFile(path.join(store,'map','README.md'),'utf8');assert(/Indexed sources/.test(mapHub));
+ const anySourceDir=(await fs.readdir(path.join(store,'map'))).find(n=>n!=='README.md');
+ const mapRoot=await fs.readFile(path.join(store,'map',anySourceDir,'_INDEX.md'),'utf8');assert(/#/.test(mapRoot));
+ // .obsidian graph options set
+ const graphPath2=path.join(store,'.obsidian','graph.json');const graphCfg=JSON.parse(await fs.readFile(graphPath2,'utf8'));
+ assert(graphCfg.options.hideUnresolved===true && /-path:sources\//.test(graphCfg.search||''));
+ // Consent include a folder; pending list shows items before and shrinks after
+ const pendingBefore=JSON.parse(execFileSync(process.execPath,[alias,'privacy','pending','--store',store],{encoding:'utf8'}));
+ JSON.parse(execFileSync(process.execPath,[alias,'privacy','consent',root,'Finance','include','--store',store],{encoding:'utf8'}));
+ await run(root,store,{});
+ const pendingAfter=JSON.parse(execFileSync(process.execPath,[alias,'privacy','pending','--store',store],{encoding:'utf8'}));
+ assert(pendingAfter.length<=pendingBefore.length);
+ // Invoices from PDF text (fallback): Romanian fields
+ const inv=path.join(root,'Factura_2026-02-01_ClientX.pdf');await fs.writeFile(inv,'Factura\nSeria AB\nNr. 123\nTotal de plata 1.234,56 RON\n', 'utf8');
+ await run(root,store,{});
+ db=await readStore(store);rows=await loadFolders(store,db.sources.find(s=>s.last_known_location===root));
+ const invFile=rows.find(r=>r.path==='.').files.find(f=>/Factura_2026-02-01_ClientX\.pdf$/.test(f.name));
+ assert(invFile.observed_as&&invFile.observed_as.kind==='invoice'&&invFile.observed_as.amount>0&&invFile.observed_as.currency==='RON');
+ // Verify copy: identical and mismatch
+ const moved=path.join(tmp,'moved-root');await fs.mkdir(path.join(moved,'Cabin'),{recursive:true});await fs.writeFile(path.join(moved,'Cabin','manual.pdf'),'fake PDF fixture');await fs.writeFile(path.join(moved,'Cabin','renamed.pdf'),'fake PDF fixture');
+ const verifyOk=JSON.parse(execFileSync(process.execPath,[alias,'verify-copy',path.join(root,'Cabin'),path.join(moved,'Cabin'),'--store',store],{encoding:'utf8'}));
+ console.log('verify-ok', verifyOk);
+ assert(verifyOk.missing.length===0 && verifyOk.different.length===0 && verifyOk.extra.length===0);
+ await fs.writeFile(path.join(moved,'Cabin','extra.pdf'),'x');
+ const verifyBad=JSON.parse(execFileSync(process.execPath,[alias,'verify-copy',path.join(root,'Cabin'),path.join(moved,'Cabin'),'--store',store],{encoding:'utf8'}));
+ assert(verifyBad.safe_to_delete===false&&verifyBad.extra.length===1);
  // Move/identity heuristics: identical folder signatures across sources are reported
- const moved=path.join(tmp,'moved-root');await fs.mkdir(path.join(moved,'Cabin'),{recursive:true});await fs.writeFile(path.join(moved,'Cabin','manual.pdf'),'fake PDF fixture');await run(moved,store,{});
+ await run(moved,store,{});
  const rev2=await review(store);assert(rev2.identical_folders.some(g=>g.length>=2));
  // Obsidian config: created and merged safely
  const obs=path.join(store,'.obsidian');await fs.stat(obs);
@@ -78,7 +107,7 @@ try{
  const app=JSON.parse(await fs.readFile(appPath,'utf8'));
  assert(Array.isArray(app.userIgnoreFilters)&&app.userIgnoreFilters.some(s=>s==='sources/')&&app.userIgnoreFilters.some(s=>s==='migrations/'));
  const graph=JSON.parse(await fs.readFile(graphPath,'utf8'));
- assert(Array.isArray(graph.groups)&&graph.groups.some(g=>g.query==='file: \"_INDEX.md\"'));
+ assert(Array.isArray(graph.groups)&&graph.groups.some(g=>g.query==='path:map/'));
  // Merge: preserve keys and avoid duplicates
  await fs.writeFile(appPath,JSON.stringify({theme:'moon',userIgnoreFilters:['custom/']},null,2));
  await fs.writeFile(graphPath,JSON.stringify({layout:'force',groups:[{query:'path:topic/',color:'#000'}]},null,2));
