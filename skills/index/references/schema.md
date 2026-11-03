@@ -45,6 +45,10 @@ A file's folder relationship comes from the containing folder record. Derive its
 
 Use `(source_id, folder id, path)` as the location-record key. Shared IDs alone must not silently collapse copies. File content hashes and observed paths are separate facts. Timestamps are ISO 8601 strings; modification dates are not capture/event dates.
 
+## Store map notes
+
+Generated Obsidian notes under `map/<source>/…` use `schema: "techistack-map-index/v1"` and a `source` property matching the source label. `/index` computes each folder’s note path once and uses that same path for the filename and every wikilink. Duplicate folder names are disambiguated with nearest parent folder names, never the source label. On regenerate, only notes with this schema and source are pruned if they are no longer expected. Year pages under `period/<year>.md` use `schema: "techistack-period/v1"` and `tags: ["type/period"]`. `insights/README.md` is created if missing and is not overwritten. The scan excludes the active store, nested Obsidian vaults, and folders that already contain this tool’s outputs. Wikilink targets and note filenames omit `[ ] | # ^`.
+
 ## Export behavior
 
 Read the manifest, choose latest (or explicitly previous), follow source/chunk references, reassemble folder parts, and map the fields to Markdown properties, CSV rows, SQLite tables, or another consumer. Copy known context and verification dates with the data. No exporter or bidirectional editing is implemented yet. Exported data must retain its source IDs and snapshot date so it cannot be mistaken for a live filesystem view.
