@@ -97,10 +97,17 @@ try{
  const someNotePath=await findFirstMd(someDir);
  const folderNote=await fs.readFile(someNotePath,'utf8');
  assert(/Indexed:/.test(folderNote));
- // Old _INDEX map notes removed on regenerate
- await fs.mkdir(path.join(store,'map','oldsrc'),{recursive:true});await fs.writeFile(path.join(store,'map','oldsrc','_INDEX.md'),'legacy','utf8');
+ // Stale generated map notes for this source are pruned; user files without our schema stay
+ const sourceDirName=(await fs.readdir(path.join(store,'map'))).find(n=>n!=='Home.md'&&!n.endsWith('.md'));
+ const sourceLabel=JSON.parse((await fs.readFile(path.join(store,'map',`${sourceDirName}.md`),'utf8')).match(/^source: (.*)$/m)[1]);
+ const stale=path.join(store,'map',sourceDirName,'GoneFolder','GoneFolder.md');
+ await fs.mkdir(path.dirname(stale),{recursive:true});
+ await fs.writeFile(stale,`---\nschema: "techistack-map-index/v1"\nsource: ${JSON.stringify(sourceLabel)}\ntitle: "GoneFolder"\n---\n# Gone\n`);
+ const userKeep=path.join(store,'map','user-note.md');
+ await fs.writeFile(userKeep,'# handwritten\n');
  await run(root,store,{});
- await assert.rejects(fs.readFile(path.join(store,'map','oldsrc','_INDEX.md'),'utf8'));
+ await assert.rejects(fs.readFile(stale,'utf8'));
+ assert.equal(await fs.readFile(userKeep,'utf8'),'# handwritten\n');
  // .obsidian graph options set
  const graphPath2=path.join(store,'.obsidian','graph.json');const graphCfg=JSON.parse(await fs.readFile(graphPath2,'utf8'));
  assert(graphCfg.hideUnresolved===true && /-path:sources\//.test(graphCfg.search||''));
@@ -167,3 +174,88 @@ try{
  const reportsDir=path.join(store,'reports','changes');const reports=(await fs.readdir(reportsDir));assert(reports.length>0);
  console.log('PASS: root-only notes, full recursion, preserved context/IDs, missing locations, per-source chunks, latest+previous retention, migration, cross-chunk search, duplicate review, nested code, symlink/Git protection, dry run, and unchanged source files.');
 }finally{await fs.rm(tmp,{recursive:true,force:true});}
+
+{
+ const tmp=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'ts-map-stable-')));
+ try{
+  const root=path.join(tmp,'archive'),store=path.join(tmp,'store');
+  async function touch(rel){
+   const p=path.join(root,rel);await fs.mkdir(path.dirname(p),{recursive:true});await fs.writeFile(p,'invoice');
+  }
+  await touch('A/Rubber/Archive/Rubber/2022/Facturi/a.pdf');
+  await touch('A/Rubber/2023/Facturi/b.pdf');
+  await touch('B/Archive/Rubber/c.pdf');
+  await run(root,store,{});
+  const mapRoot=path.join(store,'map');
+  async function listMd(dir){
+   const out=[];
+   for(const name of await fs.readdir(dir)){
+    const p=path.join(dir,name);const st=await fs.lstat(p);
+    if(st.isDirectory())out.push(...await listMd(p));
+    else if(name.endsWith('.md'))out.push(p);
+   }
+   return out;
+  }
+  async function collectWiki(dirs){
+   const links=[];
+   for(const dir of dirs){
+    if(!await fs.stat(dir).then(()=>true,()=>false))continue;
+    for(const p of await listMd(dir)){
+     const s=await fs.readFile(p,'utf8');
+     for(const m of s.matchAll(/\[\[([^\]|#]+)(?:\|[^\]]+)?\]\]/g))links.push({from:p,target:m[1].trim()});
+    }
+   }
+   return links;
+  }
+  async function assertAllResolved(){
+   const links=await collectWiki([mapRoot,path.join(store,'period'),path.join(store,'insights')]);
+   const unresolved=[];
+   for(const {from,target} of links){
+    const rel=target.endsWith('.md')?target:`${target}.md`;
+    try{await fs.stat(path.join(store,rel));}
+    catch{unresolved.push({from:path.relative(store,from),target});}
+   }
+   assert.equal(unresolved.length,0,`unresolved wikilinks: ${JSON.stringify(unresolved,null,2)}`);
+   return links;
+  }
+  const links=await assertAllResolved();
+  const sourceDir=(await fs.readdir(mapRoot)).find(n=>n!=='Home.md'&&!n.endsWith('.md'));
+  const sourceNotes=await listMd(path.join(mapRoot,sourceDir));
+  const hubNote=path.join(mapRoot,`${sourceDir}.md`);
+  const basenames=[...sourceNotes,hubNote].map(p=>path.basename(p,'.md').toLowerCase());
+  assert.equal(new Set(basenames).size,basenames.length,'duplicate note basenames in one source');
+  const names=sourceNotes.map(p=>path.basename(p,'.md'));
+  assert(names.includes('Rubber (Archive, Rubber)')&&names.includes('Rubber (Archive, B)'),names.join(', '));
+  assert(names.includes('Facturi (2022)')&&names.includes('Facturi (2023)'),names.join(', '));
+  assert(names.includes('Rubber (A)'),names.join(', '));
+  const insights=await fs.readFile(path.join(store,'insights','README.md'),'utf8');
+  assert(/research memos/i.test(insights));
+  const periodDir=path.join(store,'period');
+  const periodFiles=(await fs.readdir(periodDir)).filter(n=>n.endsWith('.md'));
+  assert(periodFiles.length>0);
+  for(const f of periodFiles){
+   const s=await fs.readFile(path.join(periodDir,f),'utf8');
+   assert(/tags: \["type\/period"\]/.test(s));
+   assert(/title: "\d{4}"/.test(s));
+  }
+  const facturi2023=sourceNotes.find(p=>p.includes(`${path.sep}2023${path.sep}Facturi${path.sep}`));
+  assert(facturi2023);
+  const body=await fs.readFile(facturi2023,'utf8');
+  const parentLink=[...body.matchAll(/\[\[([^\]|]+)/g)].map(m=>m[1]).find(t=>t.includes('/2023/'));
+  assert(parentLink);
+  const parentFile=path.join(store,parentLink.endsWith('.md')?parentLink:`${parentLink}.md`);
+  await fs.stat(parentFile);
+  const listed=sourceNotes.map(p=>path.relative(mapRoot,p)).sort();
+  console.log('fixture map listing:\n'+listed.join('\n'));
+  console.log('wikilinks',links.length,'period notes',periodFiles.join(', '));
+  await fs.rename(path.join(root,'A','Rubber','2023'),path.join(root,'A','Rubber','2023-renamed'));
+  await run(root,store,{});
+  await assertAllResolved();
+  const after=await listMd(path.join(mapRoot,sourceDir));
+  assert(!after.some(p=>p.includes(`${path.sep}2023${path.sep}`)&&!p.includes('2023-renamed')),after.map(p=>path.relative(mapRoot,p)).join('\n'));
+  assert(after.some(p=>p.includes('2023-renamed')));
+  const namesAfter=after.map(p=>path.basename(p,'.md').toLowerCase());
+  assert.equal(new Set(namesAfter).size,namesAfter.length);
+  console.log('PASS: stable map names, unique basenames, period notes, insights README, prune after rename.');
+ }finally{await fs.rm(tmp,{recursive:true,force:true});}
+}

@@ -1,6 +1,6 @@
 {
   "name": "techistack",
-  "version": "0.12.0",
+  "version": "0.12.1",
   "description": "Agent skills for one root folder overview, recursive private local JSON inventories, numbered contact sheets, and opt-in visual curation. Never moves or deletes source media. Beta: run it on a copy.",
   "author": {
     "name": "Alex Beltechi",
