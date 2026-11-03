@@ -379,10 +379,59 @@ function changeReport(previous,rows){
 function safeLabel(label){return String(label||'source').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'')||'source';}
 const MAP_SCHEMA='techistack-map-index/v1';
 const PERIOD_SCHEMA='techistack-period/v1';
-function sanitizeNoteName(name){return String(name||'folder').replace(/[\\/]/g,'-').replace(/\s+/g,' ').trim()||'folder';}
+function normalizePath(p){return path.normalize(String(p||'')).replace(/[\\/]+$/,'');}
+function containedPath(inner,outer){
+ const a=normalizePath(inner),b=normalizePath(outer);
+ if(a===b||a.startsWith(b+path.sep))return true;
+ const al=a.toLowerCase(),bl=b.toLowerCase();
+ return al===bl||al.startsWith(bl+path.sep);
+}
+function sanitizeNoteName(name){
+ return String(name||'folder').replace(/[\\/]/g,'-').replace(/[\[\]|#^]/g,'_').replace(/_+/g,'_').replace(/^[_]+|[_]+$/g,'').replace(/\s+/g,' ').trim()||'folder';
+}
+function wikiDisplay(name){
+ return String(name||'').replace(/[\r\n]/g,' ').replace(/\|/g,'／').replace(/\[/g,'(').replace(/\]/g,')').replace(/[#^]/g,' ').replace(/`/g,"'").replace(/</g,'&lt;');
+}
 function parentNamesNearestFirst(rel){
  if(!rel||rel==='.')return [];
- return rel.split('/').filter(Boolean).slice(0,-1).reverse();
+ return rel.split('/').filter(Boolean).slice(0,-1).reverse().map(sanitizeNoteName);
+}
+function safeRelPath(folderRel){
+ if(!folderRel||folderRel==='.')return '';
+ return folderRel.split('/').filter(Boolean).map(sanitizeNoteName).join('/');
+}
+async function realOrNorm(p){try{return normalizePath(await fs.realpath(p));}catch{return normalizePath(path.resolve(p));}}
+async function dirHasMapSchemaNotes(abs){
+ const roots=[abs,path.join(abs,'map')];
+ for(const dir of roots){
+  let ents;try{ents=await fs.readdir(dir,{withFileTypes:true});}catch{continue;}
+  let n=0;
+  for(const e of ents){
+   if(!e.isFile()||!e.name.endsWith('.md'))continue;
+   try{
+    const fh=await fs.open(path.join(dir,e.name),'r');
+    const buf=Buffer.alloc(1024);
+    const {bytesRead}=await fh.read(buf,0,1024,0);
+    await fh.close();
+    if(buf.slice(0,bytesRead).toString('utf8').includes(MAP_SCHEMA))return true;
+   }catch{}
+   if(++n>=12)break;
+  }
+ }
+ return false;
+}
+async function exclusionReason(abs,store){
+ const storeReal=await realOrNorm(store);
+ const absReal=await realOrNorm(abs);
+ if(containedPath(absReal,storeReal)||containedPath(abs,store)||containedPath(abs,storeReal)||containedPath(absReal,store))return 'local index store';
+ try{const st=await fs.lstat(path.join(abs,'.obsidian'));if(st.isDirectory())return 'Obsidian vault';}catch{}
+ try{
+  const idx=await fs.lstat(path.join(abs,'index.json'));
+  const mapd=await fs.lstat(path.join(abs,'map'));
+  if(idx.isFile()&&mapd.isDirectory())return 'local index store';
+ }catch{}
+ if(await dirHasMapSchemaNotes(abs))return 'generated map notes';
+ return null;
 }
 /** Final note basename per folder path. Unique within one source. Never uses the source label. */
 function disambiguateNoteNames(items,reserved){
@@ -440,7 +489,8 @@ function disambiguateNoteNames(items,reserved){
 }
 function vaultNotePath(labelSafe,folderRel,noteName){
  if(folderRel==='.')return `map/${labelSafe}`;
- return `map/${labelSafe}/${folderRel}/${noteName}`;
+ const rel=safeRelPath(folderRel);
+ return rel?`map/${labelSafe}/${rel}/${noteName}`:`map/${labelSafe}/${noteName}`;
 }
 function yearsOf(stats,rec){
  const years=new Set();
@@ -496,7 +546,7 @@ async function generateMap(store,manifest){
   const label=entry.label||d.label||'Source';
   const labelSafe=safeLabel(label);
   const sourceDir=path.join(base,labelSafe);await fs.mkdir(sourceDir,{recursive:true});
-  hub+=`- [[map/${labelSafe}|${clean(label)}]]\n`;
+  hub+=`- [[map/${labelSafe}|${wikiDisplay(label)}]]\n`;
   function subtreeFilesFor(pathRel){
    const out=[];
    for(const r of rows){
@@ -543,10 +593,10 @@ async function generateMap(store,manifest){
   function wiki(pathRel,display){
    const target=pathToVault.get(pathRel);
    if(!target)return '';
-   const alias=display??(pathRel==='.'?label:pathToNoteName.get(pathRel));
-   return `[[${target}|${clean(alias)}]]`;
+   const alias=display??(pathRel==='.'?label:(byPath.get(pathRel)?.name||pathToNoteName.get(pathRel)));
+   return `[[${target}|${wikiDisplay(alias)}]]`;
   }
-  const expected=new Set([path.join(base,`${labelSafe}.md`),...mapped.map(r=>path.join(sourceDir,r.path,`${pathToNoteName.get(r.path)}.md`))].map(p=>path.resolve(p)));
+  const expected=new Set([path.join(base,`${labelSafe}.md`),...mapped.map(r=>path.join(sourceDir,safeRelPath(r.path),`${pathToNoteName.get(r.path)}.md`))].map(p=>path.resolve(p)));
   const at=entry.snapshot_at||manifest.updated_at||new Date().toISOString();
   const rootStats=summarize('.');
   const topLinks=mapped.filter(r=>!r.path.includes('/')).map(r=>`- ${wiki(r.path)}`).join('\n');
@@ -562,7 +612,7 @@ async function generateMap(store,manifest){
   await fs.writeFile(path.join(base,`${labelSafe}.md`),hubFm+hubBody,{flag:'w'});
   for(const r of mapped){
    const noteName=pathToNoteName.get(r.path);
-   const dir=path.join(sourceDir,r.path);await fs.mkdir(dir,{recursive:true});
+   const dir=path.join(sourceDir,safeRelPath(r.path));await fs.mkdir(dir,{recursive:true});
    const filePath=path.join(dir,`${noteName}.md`);
    const parentPath=path.posix.dirname(r.path);
    const stats=summarize(r.path);
@@ -625,7 +675,7 @@ async function generateMap(store,manifest){
   const lines=[];
   for(const item of links){
    if(seen.has(item.vault))continue;seen.add(item.vault);
-   lines.push(`- [[${item.vault}|${clean(item.name)}]]`);
+   lines.push(`- [[${item.vault}|${wikiDisplay(item.name)}]]`);
   }
   const fm='---\n'+[
    `schema: ${JSON.stringify(PERIOD_SCHEMA)}`,
@@ -685,9 +735,11 @@ async function run(rootArg,storeArg,{dryRun=false,hash=false,label}={}){
   if(cat){rec.sensitivity=cat;rec.consent=(consentMap.get(rel||'.')||'pending');}
   folders.push(rec);
   for(const ent of entries){if(ent.name==='_INDEX.md')continue;const dest=path.join(abs,ent.name);
-   if(ent.name.startsWith('.')||SKIP.has(ent.name)||generated.test(ent.name)||/\.(?:app|photoslibrary|lrdata|lrlibrary)$/i.test(ent.name)||inside(dest,store)){rec.skipped.push({name:ent.name,reason:'system, dependency, generated output, package, or local store'});continue;}
+   if(ent.name.startsWith('.')||SKIP.has(ent.name)||generated.test(ent.name)||/\.(?:app|photoslibrary|lrdata|lrlibrary)$/i.test(ent.name)){rec.skipped.push({name:ent.name,reason:'system, dependency, generated output, package, or local store'});continue;}
    if(ent.isSymbolicLink()){rec.skipped.push({name:ent.name,reason:'symbolic link; not followed'});continue;}
    if(ent.isDirectory()){
+     const why=await exclusionReason(dest,store);
+     if(why){rec.skipped.push({name:ent.name,reason:why});continue;}
      const relative=rel==='.'?ent.name:rel+'/'+ent.name;
      rec.children.push(ent.name);await walk(dest,relative,id,chain,carried.origin_labels);
    }

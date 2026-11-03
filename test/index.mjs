@@ -246,8 +246,10 @@ try{
   const parentFile=path.join(store,parentLink.endsWith('.md')?parentLink:`${parentLink}.md`);
   await fs.stat(parentFile);
   const listed=sourceNotes.map(p=>path.relative(mapRoot,p)).sort();
+  const hashNames=names.filter(n=>/ \([0-9a-f]{6}\)$/.test(n));
   console.log('fixture map listing:\n'+listed.join('\n'));
-  console.log('wikilinks',links.length,'period notes',periodFiles.join(', '));
+  console.log('wikilinks',links.length,'period notes',periodFiles.join(', '),'hash-suffixed notes',hashNames.length,hashNames.join(', ')||'(none)');
+  assert.equal(hashNames.length,0,'hash suffixes used when parent names can disambiguate: '+hashNames.join(', '));
   await fs.rename(path.join(root,'A','Rubber','2023'),path.join(root,'A','Rubber','2023-renamed'));
   await run(root,store,{});
   await assertAllResolved();
@@ -257,5 +259,90 @@ try{
   const namesAfter=after.map(p=>path.basename(p,'.md').toLowerCase());
   assert.equal(new Set(namesAfter).size,namesAfter.length);
   console.log('PASS: stable map names, unique basenames, period notes, insights README, prune after rename.');
+ }finally{await fs.rm(tmp,{recursive:true,force:true});}
+}
+
+{
+ const tmp=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'ts-map-store-skip-')));
+ try{
+  const root=path.join(tmp,'archive');
+  const store=path.join(root,'_Index');
+  async function touch(rel,body='x'){
+   const p=path.join(root,rel);await fs.mkdir(path.dirname(p),{recursive:true});await fs.writeFile(p,body);
+  }
+  await touch('Accounting/a.pdf');
+  await touch('Cabin/manual.pdf');
+  await touch('X/Invoice/one.pdf');
+  await touch('Y/Invoice/two.pdf');
+  await touch('app/[slug]/page.tsx','export default function Page(){}');
+  await touch('blog/[slug]/post.md','# post');
+  await touch('OtherVault/.obsidian/app.json','{}');
+  await touch('OtherVault/note.md','vault note');
+  await touch('DummyStore/index.json','{"schema":"techistack-local-index/v2"}');
+  await touch('DummyStore/map/Home.md','# Home\n');
+  await fs.mkdir(store,{recursive:true});
+  await run(root,store,{});
+  const db=await readStore(store);
+  const rows=await loadFolders(store,db.sources[0]);
+  const rootRec=rows.find(r=>r.path==='.');
+  const skipped=new Map((rootRec.skipped||[]).map(s=>[s.name,s.reason]));
+  assert(skipped.has('_Index'),'active store must be skipped');
+  assert(skipped.has('OtherVault'),'Obsidian vault must be skipped');
+  assert(skipped.has('DummyStore'),'index.json+map folder must be skipped');
+  assert(!rows.some(r=>r.path==='_Index'||String(r.path).startsWith('_Index/')),rows.map(r=>r.path).join('\n'));
+  assert(!rows.some(r=>r.path==='OtherVault'||String(r.path).startsWith('OtherVault/')));
+  assert(!rows.some(r=>r.path==='DummyStore'||String(r.path).startsWith('DummyStore/')));
+  const mapRoot=path.join(store,'map');
+  async function listMd(dir){
+   const out=[];
+   for(const name of await fs.readdir(dir)){
+    const p=path.join(dir,name);const st=await fs.lstat(p);
+    if(st.isDirectory())out.push(...await listMd(p));
+    else if(name.endsWith('.md'))out.push(p);
+   }
+   return out;
+  }
+  const sourceDir=(await fs.readdir(mapRoot)).find(n=>n!=='Home.md'&&!n.endsWith('.md'));
+  const sourceNotes=await listMd(path.join(mapRoot,sourceDir));
+  const rels=sourceNotes.map(p=>path.relative(path.join(mapRoot,sourceDir),p));
+  assert(!rels.some(p=>p.split(path.sep)[0]==='_Index'),rels.join('\n'));
+  assert(!rels.some(p=>p.includes('OtherVault')));
+  assert(!rels.some(p=>p.includes('DummyStore')));
+  const names=sourceNotes.map(p=>path.basename(p,'.md'));
+  const hashNames=names.filter(n=>/ \([0-9a-f]{6}\)$/.test(n));
+  console.log('store-inside-root map listing:\n'+rels.sort().join('\n'));
+  console.log('hash-suffixed notes',hashNames.length,hashNames.join(', ')||'(none)');
+  assert.equal(hashNames.length,0,'unique or parent-disambiguated names must not use a hash: '+hashNames.join(', '));
+  assert(names.includes('Accounting'),names.join(', '));
+  assert(names.includes('Cabin'),names.join(', '));
+  assert(names.includes('Invoice (X)')&&names.includes('Invoice (Y)'),names.join(', '));
+  assert(!names.some(n=>/Invoice \([0-9a-f]{6}\)/.test(n)));
+  const slugNotes=names.filter(n=>n==='slug'||n.startsWith('slug ('));
+  assert.equal(slugNotes.length,2,names.join(', '));
+  assert(names.includes('slug (app)')&&names.includes('slug (blog)'),names.join(', '));
+  assert(!sourceNotes.some(p=>/[\[\]|#^]/.test(path.basename(p))));
+  assert(!sourceNotes.some(p=>p.includes('[slug]')));
+  let wikiCount=0;
+  for(const p of sourceNotes){
+   const s=await fs.readFile(p,'utf8');
+   for(const m of s.matchAll(/\[\[([^\]|#]+)(?:\|([^\]]*))?\]\]/g)){
+    wikiCount++;
+    const target=m[1];
+    assert(!/[\[\]|#^]/.test(target),`unsafe wikilink target ${target} in ${path.relative(store,p)}`);
+    const rel=target.endsWith('.md')?target:`${target}.md`;
+    await fs.stat(path.join(store,rel));
+   }
+   if(/\[slug\]/.test(s.split('---')[2]||s)){
+    /* original name may remain in title/body, not in targets */
+   }
+  }
+  const slugFile=sourceNotes.find(p=>path.basename(p)==='slug (app).md');
+  assert(slugFile);
+  const slugBody=await fs.readFile(slugFile,'utf8');
+  assert(/title: "\[slug\]"/.test(slugBody));
+  assert(/Parent: \[\[[^\]|#]+\|app\]\]/.test(slugBody));
+  const appBody=await fs.readFile(sourceNotes.find(p=>path.basename(p)==='app.md'),'utf8');
+  assert(/\[\[map\/[^\]|#]+slug \(app\)\|\(slug\)\]\]/.test(appBody),appBody);
+  console.log('PASS: store/vault exclusions, parent-name collision suffix, sanitized [slug] wikilinks; wikilinks',wikiCount);
  }finally{await fs.rm(tmp,{recursive:true,force:true});}
 }

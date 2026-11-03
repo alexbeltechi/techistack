@@ -95,7 +95,8 @@ Nested folder IDs remain scoped to their known paths within a source. To surface
 - Note filenames and every wikilink (parent, children, Home, hubs) come from one first-pass map of folder path → note path. Duplicate folder names take the nearest distinguishing parent (`Rubber (Archive)`), never the source label; a short path hash is only a last resort. Basenames are unique per source.
 - Notes link up to the parent and down to child folders. Year links go to generated `period/<year>.md` notes (`tags: ["type/period"]`) that list the folders active that year. Files are listed as plain text (never wikilinks). `map/Home.md` links each source hub, and `map/<source>.md` is the drive/source hub.
 - Regenerating a source prunes only previously generated map notes whose frontmatter still has `schema: techistack-map-index/v1` and that source. `insights/README.md` is created if missing; handwritten insights are not overwritten.
-- Folders inside code repositories only get one note at the repo root; dependency/build and app-library folders are excluded. Notes carry tags for color groups: `type/source`, `type/folder`, `type/system`.
+- Folders inside code repositories only get one note at the repo root; dependency/build and app-library folders are excluded. The active store is never scanned, even when it sits inside the selected root; nested Obsidian vaults and folders that already hold `/index` outputs are recorded as exclusions. Notes carry tags for color groups: `type/source`, `type/folder`, `type/system`.
+- Note filenames and wikilink targets drop `[ ] | # ^` so names like `app/[slug]` still resolve; the original name remains the alias and title.
 
 ## Root note and local inventory
 

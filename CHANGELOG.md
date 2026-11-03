@@ -6,6 +6,8 @@
 - Previously generated `map/` notes for a source are pruned when they still carry `schema: techistack-map-index/v1` and the matching `source`, so renamed folders do not leave orphan graph nodes. Handwritten files without that schema stay.
 - `insights/README.md` is created if missing (dated research memos, kept separate from the map).
 - Year links resolve: `/index` writes `period/<year>.md` notes (`title`, `tags: ["type/period"]`) listing the folders active in that year.
+- The scan never walks the active store, even when it lives inside the selected root. Nested Obsidian vaults (`.obsidian/`) and folders that hold this tool’s outputs (`index.json` plus `map/`, or notes with `schema: techistack-map-index/v1`) are recorded as exclusions.
+- Wikilink-breaking characters (`[ ] | # ^`) are stripped from note filenames and link targets; the readable folder name stays in the alias and title.
 
 ## 0.12.0 — 2026-11-02
 

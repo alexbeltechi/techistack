@@ -47,7 +47,7 @@ Use `(source_id, folder id, path)` as the location-record key. Shared IDs alone 
 
 ## Store map notes
 
-Generated Obsidian notes under `map/<source>/…` use `schema: "techistack-map-index/v1"` and a `source` property matching the source label. `/index` computes each folder’s note path once and uses that same path for the filename and every wikilink. Duplicate folder names are disambiguated with nearest parent folder names, never the source label. On regenerate, only notes with this schema and source are pruned if they are no longer expected. Year pages under `period/<year>.md` use `schema: "techistack-period/v1"` and `tags: ["type/period"]`. `insights/README.md` is created if missing and is not overwritten.
+Generated Obsidian notes under `map/<source>/…` use `schema: "techistack-map-index/v1"` and a `source` property matching the source label. `/index` computes each folder’s note path once and uses that same path for the filename and every wikilink. Duplicate folder names are disambiguated with nearest parent folder names, never the source label. On regenerate, only notes with this schema and source are pruned if they are no longer expected. Year pages under `period/<year>.md` use `schema: "techistack-period/v1"` and `tags: ["type/period"]`. `insights/README.md` is created if missing and is not overwritten. The scan excludes the active store, nested Obsidian vaults, and folders that already contain this tool’s outputs. Wikilink targets and note filenames omit `[ ] | # ^`.
 
 ## Export behavior
 
