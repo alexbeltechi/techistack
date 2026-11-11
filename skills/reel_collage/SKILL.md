@@ -18,10 +18,10 @@ Create short-form reels from locally available original photos, video clips, or 
 
 ## Composition — hard invariant
 
-At any instant, show **one or two original media sources, never three**, whether they are photos, videos, or a mix.
+At any instant, show **one or two original media sources, never three**. If two sources are visible, **at most one may be a video**.
 
 1. **Single:** one original photo or video fills the 9:16 canvas.
-2. **Double:** one original photo or video fills the canvas and one *different original photo or video* appears centered on it at approximately 70% of canvas width and height (maintain aspect ratio; crop/fit consistently). Supported combinations: photo+photo, video+photo, photo+video, and video+video. Video layers remain moving, not frozen into still images.
+2. **Double:** one original photo or video fills the canvas and one *different original photo or video* appears centered on it at approximately 70% of canvas width and height (maintain aspect ratio; crop/fit consistently). Supported double-layer combinations: photo+photo, video background + photo foreground, or photo background + video foreground. **Video+video is not supported**: never pair two moving video clips in the same composition. A video stays moving when paired with a photo.
 
 **Never compose from a precomposed frame, rendered shot, contact sheet, or already-overlaid image/video.** Decode each shot from its one or two original source files and render that composition independently. A frame freshly decoded from an original video is valid; an already-composited output frame is not. Never let an overlay carry into the next shot. This prevents accidental three-layer nesting.
 
@@ -43,8 +43,8 @@ By default, overlays are rectangular, fully opaque and positionally static, with
 1. Read the source folder, identify supported originals, inspect dimensions and orientation; for video also probe duration, frame rate, rotation, and whether audio is present.
 2. Optionally produce a contact sheet of still photos and sampled video frames to make editorial sequencing easier. Sample representative moments rather than exhaustively indexing long recordings.
 3. Produce a shot list, each entry with: `type` (single/double), `background_source`, optional `foreground_source`, `duration_seconds`, plus source in-points for each video layer and optional playback-speed settings; save as `shot-list.json`.
-4. Validate the plan: every source used as a single, no entry has >2 sources, all double shots reference two distinct originals, timing remains readable, and first shot is single. Ensure selected video excerpts are long enough for each segment, or deliberately loop/slow them only when requested.
-5. Render each shot **directly from its listed original(s)** into a fresh 1080x1920 canvas. Preserve orientation and image character; crop thoughtfully rather than stretch. Use an aspect-preserving fit/crop for the centered 70% overlay. For moving footage, decode both video layers at a shared output timeline, synchronize their selected in-points, and hold photos as stills for the required shot duration.
+4. Validate the plan: every source used as a single, no entry has >2 sources, all double shots reference two distinct originals, **never use two video sources in one shot**, timing remains readable, and first shot is single. Ensure selected video excerpts are long enough for each segment, or deliberately loop/slow them only when requested.
+5. Render each shot **directly from its listed original(s)** into a fresh 1080x1920 canvas. Preserve orientation and image character; crop thoughtfully rather than stretch. Use an aspect-preserving fit/crop for the centered 70% overlay. For moving footage, decode the single video source for that shot at the output timeline and hold the paired photo as a still for the required shot duration. Never composite two moving sources.
 6. Stitch segments with each shot's own duration using FFmpeg or an equivalent local encoder; never rely on repeated composites. Normalize variable frame rates and orientations for a consistent export.
 7. Decode and inspect the final export (including sample frames at cut boundaries). Verify the final duration and make a visual contact sheet of **actual exported frames** if useful.
 8. Report the output file path, counts of source photos and videos, runtime, and basic edit structure.
@@ -66,12 +66,12 @@ Use common iPhone-compatible encoding settings and test the resulting file rathe
 ## QA checklist
 
 - [ ] First shot is a single original photograph.
-- [ ] No more than two original photos visible in any shot.
+- [ ] No more than two original media sources visible in any shot, and at most one video source.
 - [ ] No composition ever uses a previously composed image or video as its source.
 - [ ] Every source item has an unobstructed full-frame appearance of roughly >=1 second; videos show actual motion.
 - [ ] Mix of singles and doubles; timing is varied without making the photos unreadable.
 - [ ] No unintended effects, borders, black frames, gaps or overlays persisting between cuts.
-- [ ] Videos are trimmed intentionally; simultaneous video layers sync correctly without freezing, unintended speed shifts, or accidental audio.
+- [ ] Video excerpts are trimmed intentionally and play without freezing, unintended speed shifts, or accidental audio. No video+video composites.
 - [ ] Original files remain unchanged.
 - [ ] Output decodes, uses the correct 9:16 dimensions and has the intended duration.
 
